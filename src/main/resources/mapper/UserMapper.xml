@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.dmdb.mapper.UserMapper">
+
+    <select id="getUsers" resultType="map">
+        SELECT USERNAME, ACCOUNT_STATUS, DEFAULT_TABLESPACE, TO_CHAR(CREATED, 'YYYY-MM-DD HH24:MI:SS') AS CREATED, PROFILE
+        FROM DBA_USERS
+        ORDER BY USERNAME
+    </select>
+
+    <select id="getTablespaces" resultType="string">
+        SELECT TABLESPACE_NAME FROM DBA_TABLESPACES
+    </select>
+
+    <select id="getUserSysPrivs" resultType="map">
+        SELECT PRIVILEGE, ADMIN_OPTION
+        FROM DBA_SYS_PRIVS
+        WHERE GRANTEE = #{username}
+        ORDER BY PRIVILEGE
+    </select>
+
+    <select id="getUserObjPrivs" resultType="map">
+        SELECT OWNER, TABLE_NAME, PRIVILEGE, GRANTOR, GRANTABLE
+        FROM DBA_TAB_PRIVS
+        WHERE GRANTEE = #{username}
+        ORDER BY OWNER, TABLE_NAME
+    </select>
+
+    <select id="getUserRoles" resultType="map">
+        SELECT GRANTED_ROLE, ADMIN_OPTION, DEFAULT_ROLE
+        FROM DBA_ROLE_PRIVS
+        WHERE GRANTEE = #{username}
+          AND (
+              GRANTED_ROLE IN ('DBA', 'PUBLIC', 'RESOURCE', 'SOI', 'SVI', 'VTI')
+              OR (
+                  GRANTED_ROLE NOT LIKE 'SYS%'
+                  AND GRANTED_ROLE NOT LIKE 'DB_%'
+                  AND GRANTED_ROLE != 'AUDITOR'
+              )
+          )
+        ORDER BY GRANTED_ROLE
+    </select>
+
+    <select id="getAllRoles" resultType="string">
+        SELECT ROLE
+        FROM DBA_ROLES
+        WHERE ROLE IN ('DBA', 'PUBLIC', 'RESOURCE', 'SOI', 'SVI', 'VTI')
+           OR (
+               ROLE NOT LIKE 'SYS%'
+               AND ROLE NOT LIKE 'DB_%'
+               AND ROLE != 'AUDITOR'
+           )
+        ORDER BY ROLE
+    </select>
+
+    <select id="getAllSysPrivileges" resultType="string">
+        SELECT DISTINCT PRIVILEGE
+        FROM DBA_SYS_PRIVS
+        WHERE
+          -- 基础安全/审计过滤
+          PRIVILEGE NOT LIKE 'AUDIT%'
+          AND PRIVILEGE NOT LIKE 'MAC%'
+          AND PRIVILEGE NOT LIKE 'LBAC%'
+          AND PRIVILEGE NOT LIKE 'ENCRYPT%'
+          AND PRIVILEGE NOT LIKE 'DEBUG%'
+          AND PRIVILEGE NOT LIKE 'FLASHBACK%'
+          AND PRIVILEGE NOT LIKE 'ADMINISTER%'
+          AND PRIVILEGE NOT LIKE 'EXEMPT%'
+
+          -- 【新增】排除过于宽泛的 ANY 权限
+          AND PRIVILEGE NOT LIKE 'ALTER ANY%'
+          AND PRIVILEGE NOT LIKE 'CREATE ANY%'
+          AND PRIVILEGE NOT LIKE 'DROP ANY%'
+          AND PRIVILEGE NOT LIKE 'SELECT ANY%'
+          AND PRIVILEGE NOT LIKE 'INSERT ANY%'
+          AND PRIVILEGE NOT LIKE 'UPDATE ANY%'
+          AND PRIVILEGE NOT LIKE 'DELETE ANY%'
+          AND PRIVILEGE NOT LIKE 'EXECUTE ANY%'
+
+          -- 【新增】排除特定无关权限
+          AND PRIVILEGE != 'LABEL DATABASE'
+          AND PRIVILEGE != 'SPOOL'
+
+        ORDER BY PRIVILEGE
+    </select>
+
+</mapper>

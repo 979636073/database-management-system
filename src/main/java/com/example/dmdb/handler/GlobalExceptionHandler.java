@@ -6,31 +6,41 @@ import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-/**
- * 全局异常处理器
- * 作用：统一捕获 Controller 抛出的异常，转换为标准 Result 格式返回
- */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-    /**
-     * 处理所有未捕获的通用异常
-     */
     @ExceptionHandler(Exception.class)
-    public Result<String> handleException(Exception e) {
+    public Result<Object> handleException(Exception e) {
         log.error("系统异常:", e);
+        String cleanMsg = getRootCauseMessage(e);
+        return Result.error(cleanMsg);
+    }
 
-        // 获取最根源的报错信息
-        Throwable rootCause = e;
-        while (rootCause.getCause() != null) {
-            rootCause = rootCause.getCause();
+    private String getRootCauseMessage(Throwable e) {
+        Throwable root = e;
+        while (root.getCause() != null) {
+            root = root.getCause();
         }
-        String msg = rootCause.getMessage();
-        if (msg == null) msg = e.toString();
 
-        // 直接返回错误信息，不再添加“请联系管理员”等后缀
-        return Result.error(msg);
+        String msg = root.getMessage();
+        if (msg == null || msg.trim().isEmpty()) {
+            return "操作失败，请查看后台日志";
+        }
+
+        // 1. 去除达梦错误码前缀 (如 [-2501]:)
+        msg = msg.replaceAll("^\\[-?\\d+\\]:\\s*", "");
+
+        // 2. 去除类名前缀 (如 dm.jdbc.driver.DMException:)
+        if (msg.contains("DMException:")) {
+            msg = msg.substring(msg.indexOf("DMException:") + 12);
+        }
+
+        // 3. 【核心新增】去除 "第1 行附近出现错误:" 这种描述
+        // 匹配 "第" + 数字 + 任意空白 + "行附近出现错误:"
+        msg = msg.replaceAll("第\\d+\\s*行附近出现错误:\\s*", "");
+
+        return msg.trim();
     }
 }

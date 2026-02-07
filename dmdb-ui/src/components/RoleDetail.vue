@@ -77,7 +77,7 @@
                                 <el-table-column prop="name" label="权限名称">
                                     <template slot-scope="scope">
                                         <el-tag size="medium" effect="light" class="priv-name-tag">{{ scope.row.name
-                                            }}</el-tag>
+                                        }}</el-tag>
                                     </template>
                                 </el-table-column>
 
@@ -144,7 +144,7 @@
                                         <span class="label">当前对象：</span>
                                         <el-tag type="success" effect="dark" size="medium">{{ selectedSchema }} . {{
                                             currentTable
-                                            }}</el-tag>
+                                        }}</el-tag>
                                     </div>
                                     <el-button type="primary" icon="el-icon-check" size="small"
                                         @click="saveObjPrivs">应用权限</el-button>
@@ -206,7 +206,7 @@ const CORE_ROLES = ["DBA", "PUBLIC", "RESOURCE", "SOI", "SVI", "VTI"];
 
 const SYS_PRIVS = [
     "CREATE TABLE", "CREATE VIEW", "CREATE PROCEDURE", "CREATE TRIGGER",
-    "CREATE SEQUENCE", "CREATE SYNONYM", 
+    "CREATE SEQUENCE", "CREATE SYNONYM",
     "CREATE ROLE", "CREATE USER", "DROP USER",
     "SELECT ANY TABLE", "INSERT ANY TABLE", "UPDATE ANY TABLE", "DELETE ANY TABLE"
 ];
@@ -308,7 +308,8 @@ export default {
         refreshData() { this.loading = true; this.initData().finally(() => { this.loading = false; }); },
         async initData() {
             try {
-                const sRes = await this.request('get', '/schemas');
+                // 【核心修复】增加 /metadata 前缀，变为 /db/metadata/schemas
+                const sRes = await this.request('get', '/metadata/schemas');
                 this.schemaList = sRes.data.data || [];
                 if (this.schemaList.includes('DMDB')) this.selectedSchema = 'DMDB';
                 else if (this.schemaList.length) this.selectedSchema = this.schemaList[0];
@@ -345,7 +346,8 @@ export default {
         },
         async loadTables() {
             if (!this.selectedSchema) return;
-            const res = await this.request('get', '/tables', { schema: this.selectedSchema });
+            // 【核心修复】增加 /metadata 前缀，变为 /db/metadata/tables
+            const res = await this.request('get', '/metadata/tables', { schema: this.selectedSchema });
             this.tableList = (res.data.data || []).map(t => t.TABLE_NAME);
             this.currentTable = '';
         },

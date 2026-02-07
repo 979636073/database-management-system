@@ -238,7 +238,6 @@
                 <i :class="summaryStyle.icon" style="margin-right: 8px;"></i>
                 <span>{{ conflictSummaryText }}</span>
             </div>
-
             <el-table :data="conflictList" border size="small" style="margin-top: 15px;"
                 :row-class-name="tableRowClassName">
                 <el-table-column label="类型" width="100" align="center">
@@ -249,7 +248,6 @@
                             被引用</el-tag>
                     </template>
                 </el-table-column>
-
                 <el-table-column label="涉及对象" min-width="180">
                     <template slot-scope="scope">
                         <div><span style="color:#909399;font-size:12px;">表：</span><el-tag size="mini" type="info"
@@ -258,27 +256,20 @@
                                 scope.row.COLUMN_NAME }}</b></div>
                     </template>
                 </el-table-column>
-
                 <el-table-column label="冲突详情" min-width="280">
                     <template slot-scope="scope">
-                        <div v-if="scope.row.CNT === 'MISSING'">
-                            目标表不存在以下 <b>{{ scope.row.MY_VAL_LIST ? scope.row.MY_VAL_LIST.length : 1 }}</b> 个主键值，无法插入。
-                        </div>
-                        <div v-else>
-                            当前记录被子表引用了 <b>{{ scope.row.CNT }}</b> 次，必须先处理子表数据。
-                        </div>
-                        <div style="margin-top:5px;font-size:12px;color:#909399;">
-                            涉及值: {{ formatValList(scope.row.MY_VAL_LIST) }}
-                        </div>
+                        <div v-if="scope.row.CNT === 'MISSING'">目标表不存在以下 <b>{{ scope.row.MY_VAL_LIST ?
+                            scope.row.MY_VAL_LIST.length : 1 }}</b> 个主键值，无法插入。</div>
+                        <div v-else>当前记录被子表引用了 <b>{{ scope.row.CNT }}</b> 次，必须先处理子表数据。</div>
+                        <div style="margin-top:5px;font-size:12px;color:#909399;">涉及值: {{
+                            formatValList(scope.row.MY_VAL_LIST) }}</div>
                     </template>
                 </el-table-column>
-
                 <el-table-column label="解决方案" width="130" align="center">
                     <template slot-scope="scope">
                         <el-button :type="scope.row.CNT === 'MISSING' ? 'danger' : 'warning'" size="mini" plain
-                            @click="resolveConflict(scope.row)">
-                            {{ scope.row.CNT === 'MISSING' ? '去父表补充' : '去子表处理' }} <i class="el-icon-right"></i>
-                        </el-button>
+                            @click="resolveConflict(scope.row)">{{ scope.row.CNT === 'MISSING' ? '去父表补充' : '去子表处理' }} <i
+                                class="el-icon-right"></i></el-button>
                     </template>
                 </el-table-column>
             </el-table>
@@ -308,14 +299,26 @@
                         <el-table-column label="列名" width="150"><template slot-scope="scope"><el-input
                                     v-model="scope.row.COLUMN_NAME" @change="markModified(scope.row)"
                                     size="mini"></el-input></template></el-table-column>
-                        <el-table-column label="类型" width="120"><template slot-scope="scope"><el-select
-                                    v-model="scope.row.DATA_TYPE" @change="markModified(scope.row)" size="mini"
-                                    filterable allow-create><el-option value="VARCHAR2"></el-option><el-option
-                                        value="NUMBER"></el-option><el-option
-                                        value="DATE"></el-option></el-select></template></el-table-column>
-                        <el-table-column label="长度" width="100"><template slot-scope="scope"><el-input
-                                    v-model="scope.row.DATA_LENGTH" @change="markModified(scope.row)"
-                                    size="mini"></el-input></template></el-table-column>
+
+                        <el-table-column label="类型" width="130">
+                            <template slot-scope="scope">
+                                <el-select v-model="scope.row.DATA_TYPE" @change="handleTypeChange(scope.row)"
+                                    size="mini" filterable allow-create>
+                                    <el-option v-for="type in dmDataTypes" :key="type" :label="type"
+                                        :value="type"></el-option>
+                                </el-select>
+                            </template>
+                        </el-table-column>
+
+                        <el-table-column label="长度/精度" width="110">
+                            <template slot-scope="scope">
+                                <el-input v-model="scope.row.DATA_LENGTH" @change="markModified(scope.row)" size="mini"
+                                    :disabled="isLengthDisabled(scope.row.DATA_TYPE)"
+                                    :placeholder="getLengthPlaceholder(scope.row.DATA_TYPE)">
+                                </el-input>
+                            </template>
+                        </el-table-column>
+
                         <el-table-column label="主键" width="50"><template slot-scope="scope"><el-checkbox
                                     v-model="scope.row.IS_PK"
                                     @change="handlePkChange(scope.row)"></el-checkbox></template></el-table-column>
@@ -399,52 +402,41 @@ import request from '@/utils/request';
 import G6 from '@antv/g6';
 import SqlEditor from './SqlEditor.vue';
 
-// G6 Node Registration
+// G6 RegisterNode (保持不变)
 G6.registerNode('db-table', {
     draw: (cfg, group) => {
         const { label, tableComment, columns = [], isCenter, isTruncated, totalColCount } = cfg;
-        const width = 300;
-        const headerHeight = 50;
-        const rowHeight = 28;
-        const contentHeight = columns.length * rowHeight;
-
-        let footerHeight = 0;
-        if (isTruncated) footerHeight = 24;
-        else if (totalColCount > 10) footerHeight = 24;
-
+        const width = 300; const headerHeight = 50; const rowHeight = 28; const contentHeight = columns.length * rowHeight;
+        let footerHeight = 0; if (isTruncated) footerHeight = 24; else if (totalColCount > 10) footerHeight = 24;
         const height = headerHeight + contentHeight + footerHeight + 8;
-
         group.addShape('rect', { attrs: { x: 0, y: 0, width, height, fill: '#fff', stroke: isCenter ? '#409EFF' : '#DCDFE6', lineWidth: 1, radius: 4 }, name: 'container-shape' });
         group.addShape('rect', { attrs: { x: 0, y: 0, width, height: headerHeight, fill: isCenter ? '#409EFF' : '#F2F6FC', radius: [4, 4, 0, 0] }, name: 'header-shape' });
-
         group.addShape('text', { attrs: { x: 10, y: 20, text: label, fill: isCenter ? '#fff' : '#333', fontSize: 13, fontWeight: 'bold', textBaseline: 'middle' }, name: 'title-text' });
-        if (tableComment) {
-            group.addShape('text', { attrs: { x: 10, y: 38, text: tableComment, fill: isCenter ? '#eee' : '#909399', fontSize: 11, textBaseline: 'middle' }, name: 'comment-text' });
-        }
-
+        if (tableComment) group.addShape('text', { attrs: { x: 10, y: 38, text: tableComment, fill: isCenter ? '#eee' : '#909399', fontSize: 11, textBaseline: 'middle' }, name: 'comment-text' });
         columns.forEach((col, i) => {
             const y = headerHeight + (i * rowHeight) + (rowHeight / 2);
             group.addShape('text', { attrs: { x: 28, y: y, text: col.COLUMN_NAME, fill: col.IS_PK ? '#E6A23C' : '#333', fontSize: 12, textBaseline: 'middle', fontWeight: col.IS_PK ? 'bold' : 'normal' } });
-            if (col.IS_PK) {
-                group.addShape('circle', { attrs: { x: 14, y: y, r: 3, fill: '#E6A23C' } });
-            }
-            if (col.COMMENTS) {
-                let comment = col.COMMENTS;
-                if (comment.length > 10) comment = comment.substring(0, 10) + '...';
-                group.addShape('text', { attrs: { x: 160, y: y, text: comment, fill: '#909399', fontSize: 11, textBaseline: 'middle' } });
-            }
+            if (col.IS_PK) group.addShape('circle', { attrs: { x: 14, y: y, r: 3, fill: '#E6A23C' } });
+            if (col.COMMENTS) { let comment = col.COMMENTS; if (comment.length > 10) comment = comment.substring(0, 10) + '...'; group.addShape('text', { attrs: { x: 160, y: y, text: comment, fill: '#909399', fontSize: 11, textBaseline: 'middle' } }); }
         });
-
         const y = headerHeight + contentHeight + 12;
-        if (isTruncated) {
-            group.addShape('text', { attrs: { x: width / 2, y: y, text: `... (共 ${totalColCount} 列，点击展开)`, fill: '#909399', fontSize: 11, textAlign: 'center', textBaseline: 'middle', cursor: 'pointer' }, name: 'expand-text' });
-        } else if (totalColCount > 10) {
-            group.addShape('text', { attrs: { x: width / 2, y: y, text: '⬆ 点击折叠', fill: '#409EFF', fontSize: 11, textAlign: 'center', textBaseline: 'middle', cursor: 'pointer' }, name: 'collapse-text' });
-        }
-
+        if (isTruncated) group.addShape('text', { attrs: { x: width / 2, y: y, text: `... (共 ${totalColCount} 列，点击展开)`, fill: '#909399', fontSize: 11, textAlign: 'center', textBaseline: 'middle', cursor: 'pointer' }, name: 'expand-text' });
+        else if (totalColCount > 10) group.addShape('text', { attrs: { x: width / 2, y: y, text: '⬆ 点击折叠', fill: '#409EFF', fontSize: 11, textAlign: 'center', textBaseline: 'middle', cursor: 'pointer' }, name: 'collapse-text' });
         return group.get('children')[0];
     }
 });
+
+const DM_DATA_TYPES = [
+    'CHAR', 'VARCHAR', 'VARCHAR2', 'TEXT', 'LONG', 'CLOB', 'BLOB',
+    'NUMBER', 'NUMERIC', 'DECIMAL', 'INTEGER', 'INT', 'BIGINT', 'TINYINT', 'BYTE', 'SMALLINT',
+    'FLOAT', 'DOUBLE', 'DOUBLE PRECISION', 'REAL',
+    'BIT', 'BINARY', 'VARBINARY',
+    'DATE', 'TIME', 'TIMESTAMP', 'TIMESTAMP WITH TIME ZONE', 'TIMESTAMP WITH LOCAL TIME ZONE',
+    'INTERVAL YEAR TO MONTH', 'INTERVAL DAY TO SECOND',
+    'BOOLEAN'
+];
+
+const NO_LENGTH_TYPES = ['INT', 'INTEGER', 'BIGINT', 'TINYINT', 'SMALLINT', 'BYTE', 'DATE', 'TIME', 'TIMESTAMP', 'CLOB', 'BLOB', 'TEXT', 'LONG', 'BOOLEAN'];
 
 export default {
     name: 'TableDetail',
@@ -465,9 +457,7 @@ export default {
             editViewVisible: false, viewSql: '',
             isSimpleView: true,
 
-            // 冲突跳转标记
             jumpFromConflict: false,
-            // 选中的行（用于批量删除）
             selectedRows: [],
 
             designVisible: false, designActiveTab: 'columns',
@@ -475,6 +465,7 @@ export default {
             designIndexes: [], deleteIndexList: [],
             designForeignKeys: [], deleteFkList: [],
             allTableNames: [], refColumnsCache: {},
+            dmDataTypes: DM_DATA_TYPES,
 
             showAllColumns: false, expandedTableList: [], graphNodeIds: [],
             sqlConfirmVisible: false, generatedSql: '', altering: false
@@ -489,10 +480,7 @@ export default {
             if (this.tableType === 'view') return !this.isSimpleView;
             return true;
         },
-        isParentMissing() {
-            return this.conflictList.length > 0 && this.conflictList[0].CNT === 'MISSING';
-        },
-        // 混合冲突判断
+        isParentMissing() { return this.conflictList.length > 0 && this.conflictList[0].CNT === 'MISSING'; },
         hasMixedConflict() {
             if (!this.conflictList.length) return false;
             const hasMissing = this.conflictList.some(c => c.CNT === 'MISSING');
@@ -507,13 +495,9 @@ export default {
         conflictSummaryText() {
             const missingCount = this.conflictList.filter(c => c.CNT === 'MISSING').length;
             const refCount = this.conflictList.filter(c => c.CNT !== 'MISSING').length;
-            if (this.hasMixedConflict) {
-                return `检测到混合冲突：有 ${missingCount} 项外键在父表中不存在，且有 ${refCount} 项记录正被子表引用。请分别处理。`;
-            } else if (missingCount > 0) {
-                return `检测到 ${missingCount} 处外键依赖缺失，请前往父表补充对应数据。`;
-            } else {
-                return `检测到 ${refCount} 处引用约束，以下数据正被其他表使用，无法直接删除或修改。`;
-            }
+            if (this.hasMixedConflict) return `检测到混合冲突：有 ${missingCount} 项外键在父表中不存在，且有 ${refCount} 项记录正被子表引用。`;
+            else if (missingCount > 0) return `检测到 ${missingCount} 处外键依赖缺失，请前往父表补充对应数据。`;
+            else return `检测到 ${refCount} 处引用约束，以下数据正被其他表使用，无法直接删除或修改。`;
         },
         summaryStyle() {
             if (this.hasMixedConflict) return { class: 'conflict-mixed', icon: 'el-icon-warning' };
@@ -530,7 +514,6 @@ export default {
             handler(val) {
                 if (val && val.field && val.value !== undefined) {
                     if (this.viewMode !== 'data') this.handleViewModeSwitch('data');
-                    // 标记从外部跳转，并执行查询
                     this.jumpFromConflict = true;
                     this.applyAutoFilter(val);
                 }
@@ -540,17 +523,9 @@ export default {
             immediate: true,
             handler(val) {
                 if (val) {
-                    this.activeTable = val;
-                    this.currentSchema = this.schema;
-                    this.currentPage = 1;
-                    this.expandedTableList = [];
-                    this.showAllColumns = false;
-                    this.selectedRows = [];
-
-                    // 如果有 initialFilter，则跳过普通 loadData，交给 initialFilter watcher
-                    if (this.initialFilter && this.initialFilter.field) {
-                        return;
-                    }
+                    this.activeTable = val; this.currentSchema = this.schema;
+                    this.currentPage = 1; this.expandedTableList = []; this.showAllColumns = false; this.selectedRows = [];
+                    if (this.initialFilter && this.initialFilter.field) return;
                     this.loadData();
                 }
             }
@@ -600,9 +575,7 @@ export default {
         },
 
         async loadData() {
-            this.resetEditState();
-            this.selectedRows = [];
-            this.loading = true;
+            this.resetEditState(); this.selectedRows = []; this.loading = true;
             try {
                 const colRes = await this.request('get', '/columns', { schema: this.currentSchema, tableName: this.activeTable });
                 this.tableColumns = colRes.data.data || [];
@@ -611,57 +584,36 @@ export default {
 
                 if (this.conditions.length > 0) {
                     const filterRes = await this.request('post', '/filter', { ...params, logic: this.logicalOperator, conditions: this.conditions });
-                    list = filterRes.data.data.list || [];
-                    total = filterRes.data.data.total || 0;
-                    if (filterRes.data.data.isView) {
-                        this.isSimpleView = filterRes.data.data.isSimpleView;
-                    }
+                    list = filterRes.data.data.list || []; total = filterRes.data.data.total || 0;
+                    if (filterRes.data.data.isView) this.isSimpleView = filterRes.data.data.isSimpleView;
                 } else {
                     const dataRes = await this.request('get', '/data', params);
-                    list = dataRes.data.data.list || [];
-                    total = dataRes.data.data.total || 0;
-                    if (dataRes.data.data.isView) {
-                        this.isSimpleView = dataRes.data.data.isSimpleView;
-                    }
+                    list = dataRes.data.data.list || []; total = dataRes.data.data.total || 0;
+                    if (dataRes.data.data.isView) this.isSimpleView = dataRes.data.data.isSimpleView;
                 }
-                this.currentDataList = list;
-                this.totalCount = total;
-                this.originalDataMap = {};
+                this.currentDataList = list; this.totalCount = total; this.originalDataMap = {};
                 list.forEach(row => { if (row.DB_INTERNAL_ID) this.originalDataMap[row.DB_INTERNAL_ID] = JSON.parse(JSON.stringify(row)); });
 
-                // 【核心逻辑】从冲突跳转来且无数据 -> 自动批量插入
                 if (this.jumpFromConflict && this.totalCount === 0) {
                     this.jumpFromConflict = false;
                     this.$nextTick(() => {
-                        // 1. 如果是 OR 多值筛选，生成多行
                         if (this.conditions.length > 0 && this.logicalOperator === 'OR') {
                             let addedCount = 0;
                             this.conditions.forEach(cond => {
                                 if (cond.operator === '=' && (cond.value || cond.value === 0)) {
-                                    this.handleAddRow(cond.value, cond.field);
-                                    addedCount++;
+                                    this.handleAddRow(cond.value, cond.field); addedCount++;
                                 }
                             });
-                            if (addedCount > 0) {
-                                this.$message({ message: `已为您批量创建 ${addedCount} 条新行并填入缺失的主键，请补充其他信息。`, type: 'success', duration: 6000, showClose: true });
-                            }
+                            if (addedCount > 0) this.$message({ message: `已为您批量创建 ${addedCount} 条新行并填入缺失的主键，请补充其他信息。`, type: 'success', duration: 6000, showClose: true });
                         }
-                        // 2. 单一条件，生成一行
                         else {
                             this.handleAddRow();
                             this.$message({ message: '未找到指定主键记录，已自动为您创建新行并填入主键，请补充其他信息。', type: 'success', duration: 5000, showClose: true });
                         }
-
-                        // 【新增】强制重新布局，防止表格渲染错位
                         if (this.$refs.dataTable) this.$refs.dataTable.doLayout();
                     });
-                } else if (this.totalCount > 0) {
-                    this.jumpFromConflict = false;
-                }
-
-            } catch (e) {
-                this.handleError(e, '数据加载失败');
-            } finally { this.loading = false; }
+                } else if (this.totalCount > 0) this.jumpFromConflict = false;
+            } catch (e) { this.handleError(e, '数据加载失败'); } finally { this.loading = false; }
         },
 
         async handleEditView() {
@@ -677,18 +629,9 @@ export default {
             this.altering = true;
             try {
                 const res = await this.request('post', '/execute', { sql: this.viewSql });
-                if (res.data.code === 200) {
-                    this.$message.success('视图修改成功');
-                    this.editViewVisible = false;
-                    this.loadData();
-                } else {
-                    throw new Error(res.data.msg);
-                }
-            } catch (e) {
-                this.handleError(e, '修改视图失败');
-            } finally {
-                this.altering = false;
-            }
+                if (res.data.code === 200) { this.$message.success('视图修改成功'); this.editViewVisible = false; this.loadData(); }
+                else { throw new Error(res.data.msg); }
+            } catch (e) { this.handleError(e, '修改视图失败'); } finally { this.altering = false; }
         },
 
         resetEditState() { this.editingCell = null; this.modifiedRows = new Set(); this.newRows = []; },
@@ -702,33 +645,19 @@ export default {
         finishEditing(row, colName) { this.editingCell = null; const id = row.DB_INTERNAL_ID; if (!id) return; const originalRow = this.originalDataMap[id]; let newVal = row[colName]; let oldVal = originalRow ? originalRow[colName] : ''; if (newVal == null) newVal = ''; if (oldVal == null) oldVal = ''; if (String(newVal) !== String(oldVal)) { this.modifiedRows.add(id); this.modifiedRows = new Set(this.modifiedRows); } },
         getCellStyle({ row, column }) { const id = row.DB_INTERNAL_ID; const col = column.property; if (!id && row._tempId) return { backgroundColor: '#f0f9eb' }; if (this.modifiedRows.has(id)) { const original = this.originalDataMap[id]; let newVal = row[col]; let oldVal = original ? original[col] : ''; if (newVal == null) newVal = ''; if (oldVal == null) oldVal = ''; if (String(newVal) !== String(oldVal)) return { backgroundColor: '#fdf6ec', color: '#E6A23C', fontWeight: 'bold' }; } return {}; },
 
-        // 【核心修复】支持参数化填充 + 字段名不区分大小写匹配
         handleAddRow(prefillValue = null, prefillField = null) {
             const newRow = { _tempId: 'NEW_' + Date.now() + Math.random().toString(36).substr(2, 5) };
             this.tableColumns.forEach(c => newRow[c.COLUMN_NAME] = null);
-
-            // 优先使用传入的填充值
             if (prefillValue !== null && prefillField) {
-                // 使用 find 查找 key，忽略大小写，确保填入正确的列属性
                 const matchKey = Object.keys(newRow).find(k => k.toUpperCase() === prefillField.toUpperCase());
-                if (matchKey) {
-                    newRow[matchKey] = prefillValue;
-                }
+                if (matchKey) newRow[matchKey] = prefillValue;
             }
-            // 否则使用当前的筛选条件 (单条件)
             else if (this.conditions.length === 1 && this.conditions[0].operator === '=') {
-                const fieldName = this.conditions[0].field;
-                const val = this.conditions[0].value;
+                const fieldName = this.conditions[0].field; const val = this.conditions[0].value;
                 const matchKey = Object.keys(newRow).find(k => k.toUpperCase() === fieldName.toUpperCase());
-
-                // 支持 0 值填充
-                if (matchKey && val !== undefined && val !== null) {
-                    newRow[matchKey] = val;
-                }
+                if (matchKey && val !== undefined && val !== null) newRow[matchKey] = val;
             }
-
-            this.currentDataList.unshift(newRow);
-            this.newRows.push(newRow);
+            this.currentDataList.unshift(newRow); this.newRows.push(newRow);
         },
 
         getPkColumnName() {
@@ -744,51 +673,17 @@ export default {
         async submitBatchChanges() {
             if (this.saving) return;
             this.saving = true;
-
-            const insertList = this.newRows.map(row => {
-                const clean = this.getCleanRowData(row);
-                delete clean.DB_INTERNAL_ID; // 插入不需要 ID
-                return clean;
-            });
-
-            const updateList = Array.from(this.modifiedRows).map(id => {
-                const row = this.currentDataList.find(r => r.DB_INTERNAL_ID === id);
-                return row ? this.getCleanRowData(row) : null;
-            }).filter(r => r !== null);
-
-            if (insertList.length === 0 && updateList.length === 0) {
-                this.$message.info("没有检测到有效变更");
-                this.saving = false;
-                return;
-            }
-
+            const insertList = this.newRows.map(row => { const clean = this.getCleanRowData(row); delete clean.DB_INTERNAL_ID; return clean; });
+            const updateList = Array.from(this.modifiedRows).map(id => { const row = this.currentDataList.find(r => r.DB_INTERNAL_ID === id); return row ? this.getCleanRowData(row) : null; }).filter(r => r !== null);
+            if (insertList.length === 0 && updateList.length === 0) { this.$message.info("没有检测到有效变更"); this.saving = false; return; }
             const loadingInstance = this.$loading({ lock: true, text: '正在批量保存中...', background: 'rgba(0, 0, 0, 0.7)' });
-
             try {
-                const res = await this.request('post', `/save/batch?schema=${this.currentSchema}&tableName=${this.activeTable}`, {
-                    insertList,
-                    updateList
-                });
-
+                const res = await this.request('post', `/save/batch?schema=${this.currentSchema}&tableName=${this.activeTable}`, { insertList, updateList });
                 loadingInstance.close();
-
-                if (res.data.code === 200) {
-                    this.$message.success('批量保存成功！');
-                    this.loadData();
-                } else if (res.data.code === 503) {
-                    // 503 冲突处理
-                    this.conflictList = res.data.data;
-                    this.conflictType = 'save';
-                    this.conflictVisible = true;
-                } else {
-                    throw new Error(res.data.msg);
-                }
-            } catch (e) {
-                loadingInstance.close();
-                this.handleError(e, '保存失败');
-            } finally {
-                this.saving = false;
-            }
+                if (res.data.code === 200) { this.$message.success('批量保存成功！'); this.loadData(); }
+                else if (res.data.code === 503) { this.conflictList = res.data.data; this.conflictType = 'save'; this.conflictVisible = true; }
+                else { throw new Error(res.data.msg); }
+            } catch (e) { loadingInstance.close(); this.handleError(e, '保存失败'); } finally { this.saving = false; }
         },
 
         handleDeleteRow(index, row) {
@@ -800,9 +695,7 @@ export default {
                     if (res.data.code === 200) { this.$message.success('删除成功'); this.loadData(); }
                     else if (res.data.code === 503) { this.conflictList = res.data.data; this.conflictPkValue = pkVal; this.conflictType = 'delete'; this.conflictVisible = true; }
                     else { throw new Error(res.data.msg); }
-                }).catch((e) => {
-                    if (e !== 'cancel') this.handleError({ message: e.message || '删除失败' }, '删除失败');
-                });
+                }).catch((e) => { if (e !== 'cancel') this.handleError({ message: e.message || '删除失败' }, '删除失败'); });
             }
         },
 
@@ -811,114 +704,49 @@ export default {
         handleQuery() { this.currentPage = 1; this.loadData(); },
         resetFilters() { this.conditions = []; this.handleQuery(); },
 
-        // 【核心修改】支持数组值 -> 生成 OR 条件
         applyAutoFilter(filter) {
-            if (Array.isArray(filter.value)) {
-                this.conditions = filter.value.map(v => ({
-                    field: filter.field,
-                    operator: '=',
-                    value: v
-                }));
-                this.logicalOperator = 'OR';
-            } else {
-                this.conditions = [{ field: filter.field, operator: '=', value: filter.value }];
-            }
-            this.$nextTick(() => {
-                this.handleQuery();
-            });
+            if (Array.isArray(filter.value)) { this.conditions = filter.value.map(v => ({ field: filter.field, operator: '=', value: v })); this.logicalOperator = 'OR'; }
+            else { this.conditions = [{ field: filter.field, operator: '=', value: filter.value }]; }
+            this.$nextTick(() => { this.handleQuery(); });
         },
 
-        // 冲突跳转处理
         resolveConflict(row) {
             this.conflictVisible = false;
-
-            // 优先使用 MY_VAL_LIST
             let filterValue = [];
-            if (row.MY_VAL_LIST && row.MY_VAL_LIST.length > 0) {
-                filterValue = row.MY_VAL_LIST;
-            } else if (row.MY_VAL !== undefined && row.MY_VAL !== null) {
-                filterValue = [row.MY_VAL];
-            } else if (this.conflictPkValue) {
-                filterValue = [this.conflictPkValue];
-            }
-
-            this.$emit('open-table', {
-                connId: this.connId,
-                schema: this.currentSchema,
-                tableName: row.TABLE_NAME,
-                initViewMode: 'data',
-                filter: {
-                    field: row.COLUMN_NAME,
-                    value: filterValue
-                }
-            });
+            if (row.MY_VAL_LIST && row.MY_VAL_LIST.length > 0) filterValue = row.MY_VAL_LIST;
+            else if (row.MY_VAL !== undefined && row.MY_VAL !== null) filterValue = [row.MY_VAL];
+            else if (this.conflictPkValue) filterValue = [this.conflictPkValue];
+            this.$emit('open-table', { connId: this.connId, schema: this.currentSchema, tableName: row.TABLE_NAME, initViewMode: 'data', filter: { field: row.COLUMN_NAME, value: filterValue } });
         },
 
-        // 处理 Selection Change
-        handleSelectionChange(val) {
-            this.selectedRows = val;
-        },
+        handleSelectionChange(val) { this.selectedRows = val; },
 
-        // 批量删除
         async handleBatchDelete() {
             if (this.selectedRows.length === 0) return;
-
             const existRowsToDelete = this.selectedRows.filter(row => row.DB_INTERNAL_ID).map(row => row.DB_INTERNAL_ID);
             const newRowsToDelete = this.selectedRows.filter(row => !row.DB_INTERNAL_ID);
-
-            this.$confirm(`确定要删除选中的 ${this.selectedRows.length} 条数据吗？`, '批量删除', {
-                confirmButtonText: '确定',
-                cancelButtonText: '取消',
-                type: 'warning'
-            }).then(async () => {
-                // 1. 先移除本地的新行
+            this.$confirm(`确定要删除选中的 ${this.selectedRows.length} 条数据吗？`, '批量删除', { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }).then(async () => {
                 if (newRowsToDelete.length > 0) {
                     newRowsToDelete.forEach(row => {
-                        const idx = this.currentDataList.indexOf(row);
-                        if (idx > -1) this.currentDataList.splice(idx, 1);
-                        const newIdx = this.newRows.indexOf(row);
-                        if (newIdx > -1) this.newRows.splice(newIdx, 1);
+                        const idx = this.currentDataList.indexOf(row); if (idx > -1) this.currentDataList.splice(idx, 1);
+                        const newIdx = this.newRows.indexOf(row); if (newIdx > -1) this.newRows.splice(newIdx, 1);
                     });
                 }
-
-                // 2. 调用后端删除已存在的行
                 if (existRowsToDelete.length > 0) {
                     const loadingInstance = this.$loading({ lock: true, text: '正在批量删除中...', background: 'rgba(0, 0, 0, 0.7)' });
                     try {
                         const res = await this.request('post', `/delete/batch?schema=${this.currentSchema}&tableName=${this.activeTable}`, existRowsToDelete);
                         loadingInstance.close();
-                        if (res.data.code === 200) {
-                            this.$message.success('批量删除成功');
-                            this.loadData();
-                        } else if (res.data.code === 503) {
-                            this.conflictList = res.data.data;
-                            this.conflictType = 'delete';
-                            this.conflictVisible = true;
-                        } else {
-                            throw new Error(res.data.msg);
-                        }
-                    } catch (e) {
-                        loadingInstance.close();
-                        this.handleError(e, '批量删除失败');
-                    }
-                } else {
-                    this.$message.success('删除成功');
-                    this.selectedRows = [];
-                }
+                        if (res.data.code === 200) { this.$message.success('批量删除成功'); this.loadData(); }
+                        else if (res.data.code === 503) { this.conflictList = res.data.data; this.conflictType = 'delete'; this.conflictVisible = true; }
+                        else { throw new Error(res.data.msg); }
+                    } catch (e) { loadingInstance.close(); this.handleError(e, '批量删除失败'); }
+                } else { this.$message.success('删除成功'); this.selectedRows = []; }
             }).catch(() => { });
         },
 
-        // 格式化显示冲突值
-        formatValList(list) {
-            if (!list || list.length === 0) return '';
-            const preview = list.slice(0, 3).join(', ');
-            return list.length > 3 ? `${preview} ...等 ${list.length} 个` : preview;
-        },
-
-        // 冲突行样式
-        tableRowClassName({ row }) {
-            return row.CNT === 'MISSING' ? 'row-missing' : 'row-ref';
-        },
+        formatValList(list) { if (!list || list.length === 0) return ''; const preview = list.slice(0, 3).join(', '); return list.length > 3 ? `${preview} ...等 ${list.length} 个` : preview; },
+        tableRowClassName({ row }) { return row.CNT === 'MISSING' ? 'row-missing' : 'row-ref'; },
 
         async handleShowDDL() {
             try {
@@ -929,7 +757,7 @@ export default {
             } catch (e) { this.handleError(e, '获取DDL失败'); }
         },
 
-        // ... Design table related methods (omitted for brevity, keep as is) ...
+        // --- 设计器相关方法 (务必保留) ---
         async handleDesignTable() {
             try {
                 const colRes = await this.request('get', '/columns', { schema: this.currentSchema, tableName: this.activeTable });
@@ -941,16 +769,11 @@ export default {
                     DATA_DEFAULT: c.DATA_DEFAULT || '',
                     IS_PK: ['1', 1, 'Y', 'y', 'true', true].includes(c.IS_PK)
                 }))));
-
                 this.designColumns = JSON.parse(JSON.stringify(this.originalColumns)).map(c => ({ ...c, _status: 'original', _originalName: c.COLUMN_NAME }));
-
                 try {
                     const idxRes = await this.request('get', '/indexes', { schema: this.currentSchema, tableName: this.activeTable });
-                    if (idxRes.data.code === 200) {
-                        this.designIndexes = idxRes.data.data.map(i => ({ ...i, _status: 'original', COLUMNS: i.COLUMNS.split(',') }));
-                    }
+                    if (idxRes.data.code === 200) this.designIndexes = idxRes.data.data.map(i => ({ ...i, _status: 'original', COLUMNS: i.COLUMNS.split(',') }));
                 } catch (e) { this.designIndexes = []; }
-
                 try {
                     const fkRes = await this.request('get', '/foreign-keys', { schema: this.currentSchema, tableName: this.activeTable });
                     if (fkRes.data.code === 200) {
@@ -959,13 +782,9 @@ export default {
                         refTables.forEach(t => this.loadRefColumns(t));
                     }
                 } catch (e) { this.designForeignKeys = []; }
-
                 const tablesRes = await this.request('get', '/tables', { schema: this.currentSchema });
                 this.allTableNames = (tablesRes.data.data || []).map(t => t.TABLE_NAME);
-
-                this.deleteColumnList = [];
-                this.deleteIndexList = [];
-                this.deleteFkList = [];
+                this.deleteColumnList = []; this.deleteIndexList = []; this.deleteFkList = [];
                 this.designActiveTab = 'columns';
                 this.designVisible = true;
             } catch (e) { this.handleError(e, '加载设计器失败'); }
@@ -976,112 +795,65 @@ export default {
             try {
                 const res = await this.request('get', '/columns', { schema: this.currentSchema, tableName: tableName });
                 this.$set(this.refColumnsCache, tableName, res.data.data || []);
-            } catch (e) {
-                console.error("加载引用表列失败", e);
-            }
+            } catch (e) { console.error("加载引用表列失败", e); }
         },
 
-        handleRefTableChange(row) {
-            row.R_COLUMN_NAME = '';
-            if (row.R_TABLE_NAME) {
-                this.loadRefColumns(row.R_TABLE_NAME);
-            }
-        },
+        handleRefTableChange(row) { row.R_COLUMN_NAME = ''; if (row.R_TABLE_NAME) this.loadRefColumns(row.R_TABLE_NAME); },
+        isDiff(newVal, oldVal) { const n = (newVal === null || newVal === undefined) ? "" : String(newVal).trim(); const o = (oldVal === null || oldVal === undefined) ? "" : String(oldVal).trim(); return n !== o; },
 
-        isDiff(newVal, oldVal) {
-            const n = (newVal === null || newVal === undefined) ? "" : String(newVal).trim();
-            const o = (oldVal === null || oldVal === undefined) ? "" : String(oldVal).trim();
-            return n !== o;
-        },
-
+        // 确保以下方法存在且未拼写错误
         addDesignColumn() { this.designColumns.push({ COLUMN_NAME: 'NEW_COL', DATA_TYPE: 'VARCHAR2', DATA_LENGTH: '50', NULLABLE: 'Y', IS_PK: false, _status: 'new' }); },
-
         removeDesignColumn(index, row) { if (row._status !== 'new') this.deleteColumnList.push(row.COLUMN_NAME); this.designColumns.splice(index, 1); },
+
+        isLengthDisabled(type) { if (!type) return false; return NO_LENGTH_TYPES.includes(type.toUpperCase()); },
+        getLengthPlaceholder(type) { if (!type) return ''; const t = type.toUpperCase(); if (NO_LENGTH_TYPES.includes(t)) return '无'; if (['NUMBER', 'DECIMAL', 'NUMERIC', 'FLOAT', 'DOUBLE', 'REAL'].includes(t)) return '精度,标度'; return '长度'; },
+        handleTypeChange(row) { if (this.isLengthDisabled(row.DATA_TYPE)) { row.DATA_LENGTH = ''; } this.markModified(row); },
 
         markModified(row) {
             if (row._status === 'new') return;
-
             const original = this.originalColumns.find(o => o.COLUMN_NAME === row._originalName);
             if (!original) return;
-
-            const isChanged =
-                this.isDiff(row.COLUMN_NAME, original.COLUMN_NAME) ||
-                this.isDiff(row.DATA_TYPE, original.DATA_TYPE) ||
-                this.isDiff(row.DATA_LENGTH, original.DATA_LENGTH) ||
-                (row.IS_PK !== original.IS_PK) ||
-                this.isDiff(row.NULLABLE, original.NULLABLE) ||
-                this.isDiff(row.DATA_DEFAULT, original.DATA_DEFAULT) ||
-                this.isDiff(row.COMMENTS, original.COMMENTS);
-
+            const isChanged = this.isDiff(row.COLUMN_NAME, original.COLUMN_NAME) || this.isDiff(row.DATA_TYPE, original.DATA_TYPE) || this.isDiff(row.DATA_LENGTH, original.DATA_LENGTH) || (row.IS_PK !== original.IS_PK) || this.isDiff(row.NULLABLE, original.NULLABLE) || this.isDiff(row.DATA_DEFAULT, original.DATA_DEFAULT) || this.isDiff(row.COMMENTS, original.COMMENTS);
             row._status = isChanged ? 'modified' : 'original';
         },
 
-        handlePkChange(row) {
-            this.markModified(row);
-        },
-
+        handlePkChange(row) { this.markModified(row); },
         addDesignIndex() { this.designIndexes.push({ INDEX_NAME: '', INDEX_TYPE: 'NORMAL', COLUMNS: [], _status: 'new' }); },
         removeDesignIndex(index, row) { if (row._status !== 'new') this.deleteIndexList.push(row.INDEX_NAME); this.designIndexes.splice(index, 1); },
-
         addDesignFk() { this.designForeignKeys.push({ CONSTRAINT_NAME: '', COLUMN_NAME: '', R_TABLE_NAME: '', R_COLUMN_NAME: '', DELETE_RULE: 'NO ACTION', _status: 'new' }); },
         removeDesignFk(index, row) { if (row._status !== 'new') this.deleteFkList.push(row.CONSTRAINT_NAME); this.designForeignKeys.splice(index, 1); },
 
         generateAndRunAlter() {
             let sqls = []; const s = this.currentSchema; const t = this.activeTable;
-
             const nameRegex = /^[a-zA-Z0-9_]+$/;
-            for (const c of this.designColumns) {
-                if (!nameRegex.test(c.COLUMN_NAME)) {
-                    this.$message.error(`列名 "${c.COLUMN_NAME}" 不合法，仅支持字母、数字和下划线。`);
-                    return;
-                }
-            }
-
+            for (const c of this.designColumns) { if (!nameRegex.test(c.COLUMN_NAME)) { this.$message.error(`列名 "${c.COLUMN_NAME}" 不合法，仅支持字母、数字和下划线。`); return; } }
             this.deleteColumnList.forEach(c => sqls.push(`ALTER TABLE "${s}"."${t}" DROP COLUMN "${c}";`));
 
             this.designColumns.filter(c => c._status === 'modified').forEach(c => {
                 const original = this.originalColumns.find(o => o.COLUMN_NAME === c._originalName);
                 if (!original) return;
-
-                if (this.isDiff(c.COLUMN_NAME, c._originalName)) {
-                    sqls.push(`ALTER TABLE "${s}"."${t}" RENAME COLUMN "${c._originalName}" TO "${c.COLUMN_NAME}";`);
-                }
-
+                if (this.isDiff(c.COLUMN_NAME, c._originalName)) sqls.push(`ALTER TABLE "${s}"."${t}" RENAME COLUMN "${c._originalName}" TO "${c.COLUMN_NAME}";`);
                 let typeLen = c.DATA_TYPE;
-                if (c.DATA_LENGTH && !['NUMBER', 'DATE', 'TIMESTAMP', 'CLOB', 'BLOB'].includes(c.DATA_TYPE)) typeLen += `(${c.DATA_LENGTH})`;
-
+                if (c.DATA_LENGTH && !NO_LENGTH_TYPES.includes(c.DATA_TYPE.toUpperCase())) typeLen += `(${c.DATA_LENGTH})`;
                 let modifySql = `ALTER TABLE "${s}"."${t}" MODIFY "${c.COLUMN_NAME}" ${typeLen}`;
                 if (c.DATA_DEFAULT && this.isDiff(c.DATA_DEFAULT, original.DATA_DEFAULT)) modifySql += ` DEFAULT ${c.DATA_DEFAULT}`;
                 if (this.isDiff(c.NULLABLE, original.NULLABLE)) modifySql += (c.NULLABLE === 'N' ? ' NOT NULL' : ' NULL');
-
-                const isAttrChanged = this.isDiff(c.DATA_TYPE, original.DATA_TYPE) ||
-                    this.isDiff(c.DATA_LENGTH, original.DATA_LENGTH) ||
-                    this.isDiff(c.NULLABLE, original.NULLABLE) ||
-                    this.isDiff(c.DATA_DEFAULT, original.DATA_DEFAULT);
-
+                const isAttrChanged = this.isDiff(c.DATA_TYPE, original.DATA_TYPE) || this.isDiff(c.DATA_LENGTH, original.DATA_LENGTH) || this.isDiff(c.NULLABLE, original.NULLABLE) || this.isDiff(c.DATA_DEFAULT, original.DATA_DEFAULT);
                 if (isAttrChanged) sqls.push(modifySql + ';');
-
-                if (this.isDiff(c.COMMENTS, original.COMMENTS)) {
-                    sqls.push(`COMMENT ON COLUMN "${s}"."${t}"."${c.COLUMN_NAME}" IS '${c.COMMENTS}';`);
-                }
+                if (this.isDiff(c.COMMENTS, original.COMMENTS)) sqls.push(`COMMENT ON COLUMN "${s}"."${t}"."${c.COLUMN_NAME}" IS '${c.COMMENTS}';`);
             });
 
             const oldPkCols = this.originalColumns.filter(c => ['1', 1, 'Y', true].includes(c.IS_PK)).map(c => c.COLUMN_NAME).sort();
             const newPkCols = this.designColumns.filter(c => c.IS_PK).map(c => c.COLUMN_NAME).sort();
-
             const isPkChanged = JSON.stringify(oldPkCols) !== JSON.stringify(newPkCols);
-
             if (isPkChanged) {
                 if (oldPkCols.length > 0) sqls.push(`ALTER TABLE "${s}"."${t}" DROP PRIMARY KEY;`);
-                if (newPkCols.length > 0) {
-                    const pkList = newPkCols.map(c => `"${c}"`).join(',');
-                    sqls.push(`ALTER TABLE "${s}"."${t}" ADD PRIMARY KEY (${pkList});`);
-                }
+                if (newPkCols.length > 0) { const pkList = newPkCols.map(c => `"${c}"`).join(','); sqls.push(`ALTER TABLE "${s}"."${t}" ADD PRIMARY KEY (${pkList});`); }
             }
 
             this.designColumns.filter(c => c._status === 'new').forEach(c => {
                 let l = `ALTER TABLE "${s}"."${t}" ADD "${c.COLUMN_NAME}" ${c.DATA_TYPE}`;
-                if (c.DATA_LENGTH && !['NUMBER', 'DATE', 'TIMESTAMP', 'CLOB', 'BLOB'].includes(c.DATA_TYPE)) l += `(${c.DATA_LENGTH})`;
+                if (c.DATA_LENGTH && !NO_LENGTH_TYPES.includes(c.DATA_TYPE.toUpperCase())) l += `(${c.DATA_LENGTH})`;
                 if (c.DATA_DEFAULT) l += ` DEFAULT ${c.DATA_DEFAULT}`;
                 if (c.NULLABLE === 'N') l += ' NOT NULL';
                 sqls.push(l + ';');
@@ -1100,8 +872,7 @@ export default {
             this.designForeignKeys.filter(f => f._status === 'new').forEach(f => {
                 if (!f.CONSTRAINT_NAME || !f.COLUMN_NAME || !f.R_TABLE_NAME || !f.R_COLUMN_NAME) return;
                 let sql = `ALTER TABLE "${s}"."${t}" ADD CONSTRAINT "${f.CONSTRAINT_NAME}" FOREIGN KEY ("${f.COLUMN_NAME}") REFERENCES "${s}"."${f.R_TABLE_NAME}"("${f.R_COLUMN_NAME}")`;
-                if (f.DELETE_RULE === 'CASCADE') sql += ' ON DELETE CASCADE';
-                else if (f.DELETE_RULE === 'SET NULL') sql += ' ON DELETE SET NULL';
+                if (f.DELETE_RULE === 'CASCADE') sql += ' ON DELETE CASCADE'; else if (f.DELETE_RULE === 'SET NULL') sql += ' ON DELETE SET NULL';
                 sqls.push(sql + ';');
             });
 
@@ -1115,22 +886,9 @@ export default {
             try {
                 const statements = this.generatedSql.split(';').map(s => s.trim()).filter(s => s);
                 const res = await this.request('post', '/execute/batch', { sqls: statements });
-                if (res.data.code === 200) {
-                    this.$message.success('修改成功');
-                    this.sqlConfirmVisible = false;
-                    this.designVisible = false;
-
-                    if (this.viewMode === 'relation') {
-                        this.loadRelations();
-                    } else {
-                        this.loadData();
-                    }
-                } else {
-                    throw new Error(res.data.msg);
-                }
-            } catch (e) {
-                this.handleError(e, '表结构变更失败');
-            } finally { this.altering = false; }
+                if (res.data.code === 200) { this.$message.success('修改成功'); this.sqlConfirmVisible = false; this.designVisible = false; if (this.viewMode === 'relation') this.loadRelations(); else this.loadData(); }
+                else { throw new Error(res.data.msg); }
+            } catch (e) { this.handleError(e, '表结构变更失败'); } finally { this.altering = false; }
         },
 
         indexMethod(index) { return (this.currentPage - 1) * this.pageSize + index + 1; },
@@ -1141,112 +899,18 @@ export default {
         async runSql() { const res = await this.request('post', '/execute', { sql: this.customSql }); if (res.data.code === 200) this.sqlResult = res.data.data; },
         destroyGraph() { if (this.graphInstance) { this.graphInstance.destroy(); this.graphInstance = null; } const c = this.$refs.relationCanvas; if (c) c.innerHTML = ''; },
 
-        handleShowAllChange(val) {
-            if (val) {
-                if (this.graphNodeIds.length > 0) {
-                    this.expandedTableList = [...this.graphNodeIds];
-                }
-            } else {
-                this.expandedTableList = [];
-            }
-            this.loadRelations();
-        },
-
-        async loadRelations() {
-            this.destroyGraph();
-            try {
-                const res = await this.request('get', '/er-data', {
-                    schema: this.currentSchema,
-                    tableName: this.activeTable,
-                    showAll: this.showAllColumns,
-                    expandedTables: this.expandedTableList.join(',')
-                });
-                if (this.viewMode === 'relation') {
-                    this.graphNodeIds = res.data.data.nodes.map(n => n.id);
-                    this.checkAutoExpandState();
-                    this.$nextTick(() => this.initGraph(res.data.data));
-                }
-            } catch (e) { }
-        },
-
-        checkAutoExpandState() {
-            if (this.graphNodeIds.length > 0) {
-                const allExpanded = this.graphNodeIds.every(id => this.expandedTableList.includes(id));
-                if (this.showAllColumns !== allExpanded) {
-                    this.showAllColumns = allExpanded;
-                }
-            }
-        },
-
-        handleGraphZoom(ratio) {
-            if (!this.graphInstance) return;
-            const zoom = this.graphInstance.getZoom();
-            this.graphInstance.zoomTo(zoom * ratio, { x: this.$refs.relationCanvas.offsetWidth / 2, y: this.$refs.relationCanvas.offsetHeight / 2 });
-        },
-        handleGraphFit() {
-            if (!this.graphInstance) return;
-            this.graphInstance.fitView();
-        },
-
+        handleShowAllChange(val) { if (val) { if (this.graphNodeIds.length > 0) this.expandedTableList = [...this.graphNodeIds]; } else { this.expandedTableList = []; } this.loadRelations(); },
+        async loadRelations() { this.destroyGraph(); try { const res = await this.request('get', '/er-data', { schema: this.currentSchema, tableName: this.activeTable, showAll: this.showAllColumns, expandedTables: this.expandedTableList.join(',') }); if (this.viewMode === 'relation') { this.graphNodeIds = res.data.data.nodes.map(n => n.id); this.checkAutoExpandState(); this.$nextTick(() => this.initGraph(res.data.data)); } } catch (e) { } },
+        checkAutoExpandState() { if (this.graphNodeIds.length > 0) { const allExpanded = this.graphNodeIds.every(id => this.expandedTableList.includes(id)); if (this.showAllColumns !== allExpanded) this.showAllColumns = allExpanded; } },
+        handleGraphZoom(ratio) { if (!this.graphInstance) return; const zoom = this.graphInstance.getZoom(); this.graphInstance.zoomTo(zoom * ratio, { x: this.$refs.relationCanvas.offsetWidth / 2, y: this.$refs.relationCanvas.offsetHeight / 2 }); },
+        handleGraphFit() { if (!this.graphInstance) return; this.graphInstance.fitView(); },
         initGraph(data) {
-            const container = this.$refs.relationCanvas; if (!container) return;
-            container.innerHTML = '';
-
-            const nodeCount = data.nodes.length;
-            const ranksep = nodeCount > 5 ? 150 : 100;
-
-            this.graphInstance = new G6.Graph({
-                container,
-                width: container.offsetWidth,
-                height: container.offsetHeight,
-                fitView: true,
-                fitViewPadding: 40,
-                renderer: 'canvas',
-                layout: {
-                    type: 'dagre',
-                    rankdir: 'LR',
-                    nodesep: 50,
-                    ranksep: ranksep
-                },
-                defaultNode: {
-                    type: 'db-table',
-                    anchorPoints: [[0, 0.5], [1, 0.5]]
-                },
-                defaultEdge: {
-                    type: 'cubic-horizontal',
-                    style: { stroke: '#A3B1BF', lineWidth: 2, endArrow: true },
-                    labelCfg: { autoRotate: true, style: { fontSize: 10, fill: '#aaa' } }
-                },
-                modes: { default: ['drag-canvas', 'zoom-canvas', 'drag-node'] }
-            });
-            this.graphInstance.data(JSON.parse(JSON.stringify(data)));
-            this.graphInstance.render();
-
-            this.graphInstance.on('node:click', (e) => {
-                const shapeName = e.target.get('name');
-                const nodeId = e.item.getModel().id;
-
-                if (shapeName === 'expand-text') {
-                    if (!this.expandedTableList.includes(nodeId)) {
-                        this.expandedTableList.push(nodeId);
-                        this.loadRelations();
-                    }
-                } else if (shapeName === 'collapse-text') {
-                    const index = this.expandedTableList.indexOf(nodeId);
-                    if (index > -1) {
-                        this.expandedTableList.splice(index, 1);
-                        this.showAllColumns = false;
-                        this.loadRelations();
-                    }
-                }
-            });
-
-            this.graphInstance.on('node:dblclick', (e) => {
-                const t = e.item.getModel().label;
-                if (t !== this.activeTable) {
-                    this.$emit('open-table', { connId: this.connId, schema: this.currentSchema, tableName: t, initViewMode: 'data' });
-                }
-            });
+            const container = this.$refs.relationCanvas; if (!container) return; container.innerHTML = '';
+            const nodeCount = data.nodes.length; const ranksep = nodeCount > 5 ? 150 : 100;
+            this.graphInstance = new G6.Graph({ container, width: container.offsetWidth, height: container.offsetHeight, fitView: true, fitViewPadding: 40, renderer: 'canvas', layout: { type: 'dagre', rankdir: 'LR', nodesep: 50, ranksep: ranksep }, defaultNode: { type: 'db-table', anchorPoints: [[0, 0.5], [1, 0.5]] }, defaultEdge: { type: 'cubic-horizontal', style: { stroke: '#A3B1BF', lineWidth: 2, endArrow: true }, labelCfg: { autoRotate: true, style: { fontSize: 10, fill: '#aaa' } } }, modes: { default: ['drag-canvas', 'zoom-canvas', 'drag-node'] } });
+            this.graphInstance.data(JSON.parse(JSON.stringify(data))); this.graphInstance.render();
+            this.graphInstance.on('node:click', (e) => { const shapeName = e.target.get('name'); const nodeId = e.item.getModel().id; if (shapeName === 'expand-text') { if (!this.expandedTableList.includes(nodeId)) { this.expandedTableList.push(nodeId); this.loadRelations(); } } else if (shapeName === 'collapse-text') { const index = this.expandedTableList.indexOf(nodeId); if (index > -1) { this.expandedTableList.splice(index, 1); this.showAllColumns = false; this.loadRelations(); } } });
+            this.graphInstance.on('node:dblclick', (e) => { const t = e.item.getModel().label; if (t !== this.activeTable) this.$emit('open-table', { connId: this.connId, schema: this.currentSchema, tableName: t, initViewMode: 'data' }); });
         }
     },
     beforeDestroy() { this.destroyGraph(); }
@@ -1478,21 +1142,18 @@ export default {
     align-items: center;
 }
 
-/* 缺失主键 - 红色系 */
 .conflict-missing {
     background-color: #fef0f0;
     color: #f56c6c;
     border: 1px solid #fde2e2;
 }
 
-/* 被引用 - 橙色系 */
 .conflict-ref {
     background-color: #fdf6ec;
     color: #e6a23c;
     border: 1px solid #faecd8;
 }
 
-/* 混合冲突 - 紫色系或深色警告 */
 .conflict-mixed {
     background-color: #f4f4f5;
     color: #909399;
@@ -1500,7 +1161,6 @@ export default {
     font-weight: bold;
 }
 
-/* 表格行微调 */
 ::v-deep .el-table .row-missing {
     background: #fffafa;
 }
