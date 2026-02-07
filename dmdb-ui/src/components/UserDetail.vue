@@ -346,7 +346,7 @@ export default {
                     this.userInfo = res.data.data.users.find(u => u.USERNAME === this.username) || {};
                 }
                 // 2. 加载模式列表 (Metadata)
-                const schemaRes = await this.request('get', '/db/metadata/schemas');
+                const schemaRes = await this.request('get', '/db/schemas');
                 if (schemaRes.data.code === 200) {
                     this.schemaList = schemaRes.data.data || [];
                     if (!this.selectedSchema) this.selectedSchema = 'DMDB'; // 默认选中 DMDB
@@ -389,7 +389,7 @@ export default {
             if (!this.selectedSchema) return;
             this.loadingTables = true;
             try {
-                const res = await this.request('get', '/db/metadata/tables', { schema: this.selectedSchema });
+                const res = await this.request('get', '/db/tables', { schema: this.selectedSchema });
                 this.tableList = (res.data.data || []).map(t => t.TABLE_NAME);
                 this.currentTable = ''; // 切换 schema 后清空选中
                 this.currentObjPerms.forEach(p => { p.granted = false; p.admin = false; });

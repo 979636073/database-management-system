@@ -308,8 +308,7 @@ export default {
         refreshData() { this.loading = true; this.initData().finally(() => { this.loading = false; }); },
         async initData() {
             try {
-                // 【核心修复】增加 /metadata 前缀，变为 /db/metadata/schemas
-                const sRes = await this.request('get', '/metadata/schemas');
+                const sRes = await this.request('get', '/schemas');
                 this.schemaList = sRes.data.data || [];
                 if (this.schemaList.includes('DMDB')) this.selectedSchema = 'DMDB';
                 else if (this.schemaList.length) this.selectedSchema = this.schemaList[0];
@@ -346,8 +345,7 @@ export default {
         },
         async loadTables() {
             if (!this.selectedSchema) return;
-            // 【核心修复】增加 /metadata 前缀，变为 /db/metadata/tables
-            const res = await this.request('get', '/metadata/tables', { schema: this.selectedSchema });
+            const res = await this.request('get', '/tables', { schema: this.selectedSchema });
             this.tableList = (res.data.data || []).map(t => t.TABLE_NAME);
             this.currentTable = '';
         },

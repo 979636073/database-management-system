@@ -84,7 +84,8 @@
         <p>请新建连接并选择数据表、视图、用户或角色进行管理</p>
       </div>
 
-      <el-tabs v-else v-model="activeTab" type="card" closable @tab-remove="removeTab" class="content-tabs">
+      <el-tabs v-else v-model="activeTab" type="card" closable @tab-remove="removeTab" class="content-tabs"
+        @contextmenu.native.prevent="openContextMenu">
         <el-tab-pane v-for="item in tabs" :key="item.key" :label="item.title" :name="item.key">
 
           <TableDetail v-if="item.type === 'table' || item.type === 'view'" :conn-id="item.connId"
@@ -99,6 +100,12 @@
 
         </el-tab-pane>
       </el-tabs>
+
+      <ul v-show="contextMenuVisible" :style="{ left: menuLeft + 'px', top: menuTop + 'px' }" class="context-menu">
+        <li @click="closeCurrentTab">关闭当前</li>
+        <li @click="closeOtherTabs">关闭其他</li>
+        <li @click="closeAllTabs" class="border-top">关闭全部</li>
+      </ul>
     </el-main>
 
     <el-dialog :title="dialogTitle" :visible.sync="dialogVisible" width="400px" :close-on-click-modal="false">
@@ -218,7 +225,7 @@
 import request from "@/utils/request";
 import TableDetail from "./TableDetail.vue";
 import RoleDetail from "./RoleDetail.vue";
-import UserDetail from "./UserDetail.vue"; // 引入详情组件
+import UserDetail from "./UserDetail.vue";
 
 const STORAGE_KEY = "DMDB_CONNECTIONS";
 
@@ -254,19 +261,63 @@ export default {
       createRoleVisible: false,
       roleForm: { name: "" },
 
-      // 用户管理相关
       createUserVisible: false,
       userForm: { username: '', password: '', tablespace: '' },
-      tablespaces: []
+      tablespaces: [],
+
+      // 右键菜单相关
+      contextMenuVisible: false,
+      menuLeft: 0,
+      menuTop: 0,
+      targetTabKey: null,
     };
   },
   watch: {
     filterText(val) { this.$refs.tree.filter(val); },
+    contextMenuVisible(visible) {
+      if (visible) {
+        document.body.addEventListener('click', this.closeContextMenu);
+      } else {
+        document.body.removeEventListener('click', this.closeContextMenu);
+      }
+    }
   },
   created() {
     this.restoreConnections();
   },
   methods: {
+    // --- 右键菜单功能 ---
+    openContextMenu(e) {
+      // 检查点击的是否是标签页头
+      const tabItem = e.target.closest('.el-tabs__item');
+      if (tabItem) {
+        const tabKey = tabItem.id.replace('tab-', '');
+        this.targetTabKey = tabKey;
+        this.menuLeft = e.clientX;
+        this.menuTop = e.clientY + 10;
+        this.contextMenuVisible = true;
+      }
+    },
+    closeContextMenu() {
+      this.contextMenuVisible = false;
+    },
+    closeCurrentTab() {
+      if (this.targetTabKey) {
+        this.removeTab(this.targetTabKey);
+      }
+    },
+    closeOtherTabs() {
+      if (this.targetTabKey) {
+        this.tabs = this.tabs.filter(tab => tab.key === this.targetTabKey);
+        this.activeTab = this.targetTabKey;
+      }
+    },
+    closeAllTabs() {
+      this.tabs = [];
+      this.activeTab = '';
+    },
+    // --- 结束右键菜单功能 ---
+
     filterNode(value, data) {
       if (!value) return true;
       return data.label.toLowerCase().indexOf(value.toLowerCase()) !== -1;
@@ -275,14 +326,14 @@ export default {
       if (type === "root") return "el-icon-connection";
       if (type === "folder_schema") return "el-icon-files";
       if (type === "folder_role") return "el-icon-user-solid";
-      if (type === "folder_user") return "el-icon-user"; // 用户文件夹
+      if (type === "folder_user") return "el-icon-user";
       if (type === "schema") return "el-icon-folder-opened";
       if (type && type.startsWith("folder_")) return "el-icon-folder";
       if (type === "table") return "el-icon-document-copy";
       if (type === "view") return "el-icon-view";
       if (type === "trigger") return "el-icon-s-operation";
       if (type === "role") return "el-icon-s-custom";
-      if (type === "user") return "el-icon-user-solid"; // 用户节点
+      if (type === "user") return "el-icon-user-solid";
       return "el-icon-document";
     },
     handleViewModeChange(mode) { this.globalViewMode = mode; },
@@ -315,9 +366,7 @@ export default {
                   this.$set(targetNode, 'errorMsg', res.data.msg);
                 }
               }
-            } catch (e) {
-              // ignore
-            }
+            } catch (e) { }
           });
         } catch (e) { }
       }
@@ -337,21 +386,14 @@ export default {
       if (data.type === "root") {
         resolve([
           { label: '模式', type: 'folder_schema', connId: data.id, connName: data.label, leaf: false },
-          // 【核心】改为非叶子节点，支持展开加载用户列表
           { label: '用户', type: 'folder_user', connId: data.id, connName: data.label, leaf: false },
           { label: '角色', type: 'folder_role', connId: data.id, connName: data.label, leaf: false }
         ]);
       } else if (data.type === "folder_user") {
-        // 加载用户列表，作为叶子节点
         try {
           const res = await request.get("/db/users/list", { headers: { "Conn-Id": data.connId } });
           const users = (res.data.data.users || []).map(u => ({
-            label: u.USERNAME,
-            type: "user",
-            status: u.ACCOUNT_STATUS,
-            connId: data.connId,
-            connName: data.connName,
-            leaf: true
+            label: u.USERNAME, type: "user", status: u.ACCOUNT_STATUS, connId: data.connId, connName: data.connName, leaf: true
           }));
           this.tablespaces = res.data.data.tablespaces || [];
           resolve(users);
@@ -364,6 +406,7 @@ export default {
         } catch (e) { resolve([]); }
       } else if (data.type === "folder_schema") {
         try {
+          // 这里保持原代码路径 /db/schemas
           const res = await request.get("/db/schemas", { headers: { "Conn-Id": data.connId } });
           const sorted = (res.data.data || []).sort((a, b) => a.localeCompare(b));
           resolve(sorted.map(s => ({ label: s, type: "schema", connId: data.connId, connName: data.connName, leaf: false })));
@@ -376,16 +419,19 @@ export default {
         ]);
       } else if (data.type === "folder_table") {
         try {
+          // 这里保持原代码路径 /db/tables
           const res = await request.get("/db/tables", { params: { schema: data.schema }, headers: { "Conn-Id": data.connId } });
           resolve(res.data.data.map(t => ({ label: t.TABLE_NAME, comment: t.COMMENTS, type: "table", connId: data.connId, connName: data.connName, schema: data.schema, leaf: true })));
         } catch (e) { resolve([]); }
       } else if (data.type === "folder_view") {
         try {
+          // 这里保持原代码路径 /db/views
           const res = await request.get("/db/views", { params: { schema: data.schema }, headers: { "Conn-Id": data.connId } });
           resolve(res.data.data.map(v => ({ label: v.VIEW_NAME, type: "view", connId: data.connId, connName: data.connName, schema: data.schema, leaf: true })));
         } catch (e) { resolve([]); }
       } else if (data.type === "folder_trigger") {
         try {
+          // 这里保持原代码路径 /db/triggers
           const res = await request.get("/db/triggers", { params: { schema: data.schema }, headers: { "Conn-Id": data.connId } });
           resolve(res.data.data.map(t => ({ label: t.TRIGGER_NAME, status: t.STATUS, type: "trigger", connId: data.connId, connName: data.connName, schema: data.schema, leaf: true })));
         } catch (e) { resolve([]); }
@@ -414,7 +460,6 @@ export default {
           if (!this.isEditMode) {
             this.treeData.push({ id: res.data.data, label: this.connForm.name, type: "root", leaf: false, config: JSON.parse(JSON.stringify(this.connForm)), connStatus: "success", errorMsg: "" });
           } else {
-            // update logic if needed
             this.currentEditNode.label = this.connForm.name;
             this.currentEditNode.config = JSON.parse(JSON.stringify(this.connForm));
           }
@@ -438,7 +483,6 @@ export default {
       } else if (data.type === "role") {
         this.openTab(data.connId, data.connName, null, data.label, 'role');
       } else if (data.type === "user") {
-        // 【新增】点击用户节点，打开 UserDetail
         this.openTab(data.connId, data.connName, null, data.label, 'user');
       } else if (data.type === "trigger") {
         this.$message.info(`触发器 [${data.label}] (暂不支持编辑)`);
@@ -480,7 +524,7 @@ export default {
           tableType: tableType,
           type: tableType,
           roleName: tableType === 'role' ? tableName : null,
-          username: tableType === 'user' ? tableName : null, // Pass username
+          username: tableType === 'user' ? tableName : null,
           filter: filter,
           initViewMode: finalViewMode,
         });
@@ -503,14 +547,9 @@ export default {
       this.tabs = tabs.filter((tab) => tab.key !== targetName);
     },
 
-    // 处理 UserDetail 删除用户后的回调
     handleUserDeleted(username) {
-      // 关闭当前 Tab
       const targetTab = this.tabs.find(t => t.type === 'user' && t.username === username);
       if (targetTab) this.removeTab(targetTab.key);
-      // 刷新树（找到当前 Tab 对应的连接节点下的 folder_user 节点并刷新）
-      // 简单做法：让用户手动刷新，或遍历树查找
-      // 这里的 currentNodeRef 可能是上次点击的节点，未必准确。保险起见暂不自动刷新，或重新触发 loadNode
     },
 
     openCreateDialog(node, data) {
@@ -525,7 +564,6 @@ export default {
       } else if (data.type === "folder_role") {
         this.createRoleVisible = true;
       } else if (data.type === "folder_user") {
-        // 新建用户
         this.userForm = { username: '', password: '', tablespace: 'MAIN' };
         request.get("/db/users/list", { headers: { "Conn-Id": data.connId } }).then(res => {
           if (res.data.data.tablespaces) this.tablespaces = res.data.data.tablespaces;
@@ -559,7 +597,6 @@ export default {
             this.removeTab(tabKey);
             if (node.parent) { node.parent.loaded = false; node.parent.expand(); }
           } else {
-            // 【修改】针对用户删除错误，使用弹窗
             if (data.type === 'user') {
               this.$alert(res.data.msg, '删除失败', { type: 'error' });
             } else {
@@ -569,7 +606,6 @@ export default {
         }).catch(() => { });
     },
 
-    // 【修改】创建用户错误使用弹窗
     async submitCreateUser() {
       if (!this.userForm.username || !this.userForm.password) return this.$message.warning("请填写完整");
       this.submitting = true;
@@ -714,6 +750,7 @@ export default {
   flex-direction: column;
   background: #fff;
   overflow: hidden;
+  position: relative;
 }
 
 .empty-state {
@@ -751,5 +788,38 @@ export default {
 
 ::v-deep .el-tab-pane {
   height: 100%;
+}
+
+/* 右键菜单样式 */
+.context-menu {
+  position: fixed;
+  z-index: 9999;
+  background: #fff;
+  border: 1px solid #ebeef5;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  padding: 5px 0;
+  margin: 0;
+  list-style: none;
+  font-size: 13px;
+  color: #606266;
+  min-width: 120px;
+}
+
+.context-menu li {
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.context-menu li:hover {
+  background-color: #ecf5ff;
+  color: #409EFF;
+}
+
+.context-menu .border-top {
+  border-top: 1px solid #ebeef5;
+  margin-top: 5px;
+  padding-top: 8px;
 }
 </style>
