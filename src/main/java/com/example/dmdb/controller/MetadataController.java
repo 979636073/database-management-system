@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/db") // 保持与原来一致
+@RequestMapping("/api/db/") // 保持与原来一致
 @CrossOrigin
 public class MetadataController {
 

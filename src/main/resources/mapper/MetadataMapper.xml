@@ -70,7 +70,18 @@
         FROM ALL_INDEXES I
         WHERE I.TABLE_OWNER = #{schema}
           AND I.TABLE_NAME = #{tableName}
+          -- 1. 排除系统生成的索引 (通常由数据库自动维护)
           AND I.GENERATED = 'N'
+          -- 2. 排除 LOB 字段的内部索引
+          AND I.INDEX_TYPE NOT LIKE 'LOB%'
+          -- 3. 排除主键(Primary Key)关联的索引，因为主键已在列属性中显示，避免重复
+          AND NOT EXISTS (
+              SELECT 1
+              FROM ALL_CONSTRAINTS C
+              WHERE C.OWNER = I.OWNER
+                AND C.CONSTRAINT_TYPE = 'P'
+                AND C.INDEX_NAME = I.INDEX_NAME
+          )
     </select>
 
     <select id="getForeignKeys" resultType="map">
