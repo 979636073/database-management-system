@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.example.dmdb.mapper.DbMapper">
+<mapper namespace="com.example.dmdb.mapper.MetadataMapper">
 
     <select id="getAllSchemas" resultType="string">
         SELECT DISTINCT OWNER FROM ALL_TABLES
@@ -28,18 +28,6 @@
         SELECT TRIGGER_NAME, STATUS FROM ALL_TRIGGERS WHERE OWNER = #{schema}
     </select>
 
-    <select id="countData" resultType="long">
-        SELECT COUNT(1) FROM "${schema}"."${tableName}"
-    </select>
-
-    <select id="getDataPage" resultType="java.util.LinkedHashMap">
-        SELECT ROWIDTOCHAR(rowid) as DB_INTERNAL_ID, T.* FROM "${schema}"."${tableName}" T LIMIT #{limit} OFFSET #{offset}
-    </select>
-
-    <select id="getDataByRowId" resultType="java.util.LinkedHashMap">
-        SELECT ROWIDTOCHAR(rowid) as DB_INTERNAL_ID, T.* FROM "${schema}"."${tableName}" T WHERE rowid = '${rowId}'
-    </select>
-
     <select id="getDDL" resultType="java.lang.Object">
         SELECT
             DBMS_METADATA.GET_DDL(#{type}, #{tableName}, #{schema})
@@ -50,56 +38,6 @@
                     FROM ALL_COL_COMMENTS
                     WHERE OWNER = #{schema} AND TABLE_NAME = #{tableName} AND COMMENTS IS NOT NULL), '')
         FROM DUAL
-    </select>
-
-    <update id="executeSql">${sql}</update>
-
-    <select id="runQuery" resultType="java.util.LinkedHashMap">${sql}</select>
-
-    <insert id="insertData">
-        INSERT INTO "${schema}"."${tableName}"
-        <foreach collection="data.keys" item="key" open="(" separator="," close=")">"${key}"</foreach>
-        VALUES
-        <foreach collection="data.values" item="val" open="(" separator="," close=")">#{val}</foreach>
-    </insert>
-
-    <update id="updateByRowId">
-        UPDATE "${schema}"."${tableName}"
-        <set>
-            <foreach collection="data" item="val" index="key" separator=",">"${key}" = #{val}</foreach>
-        </set>
-        WHERE rowid = '${rowId}'
-    </update>
-
-    <delete id="deleteByRowId">
-        DELETE FROM "${schema}"."${tableName}" WHERE rowid = '${rowId}'
-    </delete>
-
-    <select id="countByConditions" resultType="long">
-        SELECT COUNT(1) FROM "${schema}"."${tableName}"
-        <where>
-            <foreach collection="conditions" item="cond">
-                <if test="logic == 'OR'"> OR </if><if test="logic == 'AND'"> AND </if>
-                "${cond.field}" ${cond.operator}
-                <if test="cond.operator != 'IS NULL' and cond.operator != 'IS NOT NULL'">
-                    <choose><when test="cond.operator == 'LIKE'">'%${cond.value}%'</when><otherwise>'${cond.value}'</otherwise></choose>
-                </if>
-            </foreach>
-        </where>
-    </select>
-
-    <select id="queryByConditionsPage" resultType="java.util.LinkedHashMap">
-        SELECT ROWIDTOCHAR(rowid) as DB_INTERNAL_ID, T.* FROM "${schema}"."${tableName}" T
-        <where>
-            <foreach collection="conditions" item="cond">
-                <if test="logic == 'OR'"> OR </if><if test="logic == 'AND'"> AND </if>
-                "${cond.field}" ${cond.operator}
-                <if test="cond.operator != 'IS NULL' and cond.operator != 'IS NOT NULL'">
-                    <choose><when test="cond.operator == 'LIKE'">'%${cond.value}%'</when><otherwise>'${cond.value}'</otherwise></choose>
-                </if>
-            </foreach>
-        </where>
-        LIMIT #{limit} OFFSET #{offset}
     </select>
 
     <select id="getTableRelations" resultType="map">
@@ -121,10 +59,18 @@
         SELECT A.TABLE_NAME, A.COLUMN_NAME FROM ALL_CONS_COLUMNS A JOIN ALL_CONSTRAINTS C ON A.CONSTRAINT_NAME = C.CONSTRAINT_NAME AND A.OWNER = C.OWNER JOIN ALL_CONSTRAINTS C_PK ON C.R_CONSTRAINT_NAME = C_PK.CONSTRAINT_NAME AND C.R_OWNER = C_PK.OWNER WHERE C.CONSTRAINT_TYPE = 'R' AND C_PK.OWNER = #{schema} AND C_PK.TABLE_NAME = #{tableName}
     </select>
 
-    <update id="updateTableField">UPDATE "${schema}"."${tableName}" SET "${column}" = #{newVal} WHERE "${column}" = #{oldVal}</update>
-
     <select id="getIndexes" resultType="map">
-        SELECT INDEX_NAME, INDEX_TYPE, UNIQUENESS, (SELECT LISTAGG(COLUMN_NAME, ',') WITHIN GROUP(ORDER BY COLUMN_POSITION) FROM ALL_IND_COLUMNS WHERE INDEX_OWNER = I.OWNER AND INDEX_NAME = I.INDEX_NAME) AS COLUMNS FROM ALL_INDEXES I WHERE TABLE_OWNER = #{schema} AND TABLE_NAME = #{tableName}
+        SELECT
+            I.INDEX_NAME,
+            I.INDEX_TYPE,
+            I.UNIQUENESS,
+            NVL((SELECT LISTAGG(C.COLUMN_NAME, ',') WITHIN GROUP(ORDER BY C.COLUMN_POSITION)
+                 FROM ALL_IND_COLUMNS C
+                 WHERE C.INDEX_OWNER = I.OWNER AND C.INDEX_NAME = I.INDEX_NAME), '') AS COLUMNS
+        FROM ALL_INDEXES I
+        WHERE I.TABLE_OWNER = #{schema}
+          AND I.TABLE_NAME = #{tableName}
+          AND I.GENERATED = 'N'
     </select>
 
     <select id="getForeignKeys" resultType="map">
@@ -133,36 +79,6 @@
 
     <select id="getPkColumn" resultType="string">
         SELECT ACC.COLUMN_NAME FROM ALL_CONSTRAINTS AC JOIN ALL_CONS_COLUMNS ACC ON AC.CONSTRAINT_NAME = ACC.CONSTRAINT_NAME WHERE AC.CONSTRAINT_TYPE = 'P' AND AC.OWNER = #{schema} AND AC.TABLE_NAME = #{tableName} AND ROWNUM = 1
-    </select>
-
-    <select id="countReference" resultType="int">
-        SELECT COUNT(1) FROM "${schema}"."${tableName}" WHERE "${columnName}" = #{value}
-    </select>
-
-    <select id="getRoles" resultType="map" flushCache="true">
-        SELECT ROLE AS "ROLE_NAME" FROM DBA_ROLES ORDER BY ROLE
-    </select>
-
-    <select id="countRoleUsers" resultType="int">
-        SELECT COUNT(1) FROM DBA_ROLE_PRIVS WHERE GRANTED_ROLE = #{roleName}
-    </select>
-
-    <select id="getRoleRolePrivs" resultType="map" flushCache="true">
-        SELECT GRANTED_ROLE, ADMIN_OPTION FROM DBA_ROLE_PRIVS WHERE GRANTEE = #{roleName}
-    </select>
-
-    <select id="getRoleSysPrivs" resultType="map" flushCache="true">
-        SELECT PRIVILEGE, ADMIN_OPTION FROM DBA_SYS_PRIVS WHERE GRANTEE = #{roleName}
-    </select>
-
-    <select id="getRoleObjPrivs" resultType="map" flushCache="true">
-        SELECT
-            OWNER,
-            TABLE_NAME,
-            PRIVILEGE,
-            GRANTABLE
-        FROM DBA_TAB_PRIVS
-        WHERE GRANTEE = #{roleName}
     </select>
 
 </mapper>

@@ -33,5 +33,5 @@ build/
 .vscode/
 
 ### database-management-system ###
-dmdb/dist/
-dmdb/node_modules/
+dist
+node_modules/
