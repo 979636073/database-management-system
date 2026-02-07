@@ -31,3 +31,7 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### database-management-system ###
+dmdb/dist/
+dmdb/node_modules/
