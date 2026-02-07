@@ -14,14 +14,18 @@ public class TableDataServiceImpl extends AbstractDbService {
     public Result<Map<String, Object>> getData(String schema, String tableName, int page, int size) {
         validateIdentifiers(schema, tableName);
         int offset = (page - 1) * size;
-        long total = dbMapper.countData(schema, tableName);
-        List<Map<String, Object>> list = processResultList(dbMapper.getDataPage(schema, tableName, size, offset));
+        long total = tableDataMapper.countData(schema, tableName);
+        List<Map<String, Object>> list = processResultList(tableDataMapper.getDataPage(schema, tableName, size, offset));
+
         Map<String, Object> res = new HashMap<>();
         res.put("total", total);
         res.put("list", list);
+
         boolean isView = isViewObject(schema, tableName);
         res.put("isView", isView);
-        if (isView) res.put("isSimpleView", analyzeViewComplexity(schema, tableName));
+        if (isView) {
+            res.put("isSimpleView", analyzeViewComplexity(schema, tableName));
+        }
         return Result.success(res);
     }
 
@@ -30,13 +34,14 @@ public class TableDataServiceImpl extends AbstractDbService {
         String tableName = (String) payload.get("tableName");
         String logic = (String) payload.get("logic");
         List<Map<String, String>> conditions = (List<Map<String, String>>) payload.get("conditions");
+
         int page = payload.get("page") != null ? Integer.parseInt(String.valueOf(payload.get("page"))) : 1;
         int size = payload.get("size") != null ? Integer.parseInt(String.valueOf(payload.get("size"))) : 50;
         int offset = (page - 1) * size;
 
         validateIdentifiers(schema, tableName);
-        long total = dbMapper.countByConditions(schema, tableName, conditions, logic);
-        List<Map<String, Object>> list = processResultList(dbMapper.queryByConditionsPage(schema, tableName, conditions, logic, size, offset));
+        long total = tableDataMapper.countByConditions(schema, tableName, conditions, logic);
+        List<Map<String, Object>> list = processResultList(tableDataMapper.queryByConditionsPage(schema, tableName, conditions, logic, size, offset));
 
         Map<String, Object> res = new HashMap<>();
         res.put("total", total);
@@ -54,21 +59,21 @@ public class TableDataServiceImpl extends AbstractDbService {
                 Map<String, Object> data = new HashMap<>(row);
                 data.remove("DB_INTERNAL_ID");
                 if (data.isEmpty()) return Result.success("无数据变更");
-                dbMapper.updateByRowId(schema, tableName, internalId.toString(), data);
+                tableDataMapper.updateByRowId(schema, tableName, internalId.toString(), data);
             } else {
                 if (row.containsKey("DB_INTERNAL_ID")) row.remove("DB_INTERNAL_ID");
-                dbMapper.insertData(schema, tableName, row);
+                tableDataMapper.insertData(schema, tableName, row);
             }
             return Result.success("保存成功");
         } catch (Exception e) {
             log.error("Save data failed", e);
             Object pkVal = null;
             try {
-                String pkCol = dbMapper.getPkColumn(schema, tableName);
+                String pkCol = metadataMapper.getPkColumn(schema, tableName);
                 if (pkCol != null) {
                     Object rowId = row.get("DB_INTERNAL_ID");
                     if (rowId != null) {
-                        Map<String, Object> oldRow = dbMapper.getDataByRowId(schema, tableName, rowId.toString());
+                        Map<String, Object> oldRow = tableDataMapper.getDataByRowId(schema, tableName, rowId.toString());
                         if (oldRow != null) pkVal = oldRow.get(pkCol);
                     } else pkVal = row.get(pkCol);
                 }
@@ -91,7 +96,7 @@ public class TableDataServiceImpl extends AbstractDbService {
             if (insertList != null) {
                 for (Map<String, Object> row : insertList) {
                     if (row.containsKey("DB_INTERNAL_ID")) row.remove("DB_INTERNAL_ID");
-                    dbMapper.insertData(schema, tableName, row);
+                    tableDataMapper.insertData(schema, tableName, row);
                 }
             }
             if (updateList != null) {
@@ -100,7 +105,7 @@ public class TableDataServiceImpl extends AbstractDbService {
                     if (rowId == null) continue;
                     Map<String, Object> data = new HashMap<>(row);
                     data.remove("DB_INTERNAL_ID");
-                    dbMapper.updateByRowId(schema, tableName, rowId, data);
+                    tableDataMapper.updateByRowId(schema, tableName, rowId, data);
                 }
             }
             return Result.success("批量保存成功");
@@ -119,15 +124,15 @@ public class TableDataServiceImpl extends AbstractDbService {
                 Object pkVal = null;
                 if (row.containsKey("DB_INTERNAL_ID")) {
                     try {
-                        String pkCol = dbMapper.getPkColumn(schema, tableName);
+                        String pkCol = metadataMapper.getPkColumn(schema, tableName);
                         if (pkCol != null) {
-                            Map<String, Object> oldRow = dbMapper.getDataByRowId(schema, tableName, row.get("DB_INTERNAL_ID").toString());
+                            Map<String, Object> oldRow = tableDataMapper.getDataByRowId(schema, tableName, row.get("DB_INTERNAL_ID").toString());
                             if (oldRow != null) pkVal = oldRow.get(pkCol);
                         }
                     } catch (Exception ex) {}
                 } else {
                     try {
-                        String pkCol = dbMapper.getPkColumn(schema, tableName);
+                        String pkCol = metadataMapper.getPkColumn(schema, tableName);
                         if (pkCol != null) pkVal = row.get(pkCol);
                     } catch (Exception ex) {}
                 }
@@ -144,6 +149,7 @@ public class TableDataServiceImpl extends AbstractDbService {
                         Object cntVal = c.get("CNT");
                         if ("MISSING".equals(cntVal)) agg.put("CNT", "MISSING");
                         else agg.put("CNT", (Integer) agg.getOrDefault("CNT", 0) + (Integer) cntVal);
+
                         List<Object> valList = (List<Object>) agg.getOrDefault("MY_VAL_LIST", new ArrayList<>());
                         valList.add(c.get("MY_VAL"));
                         agg.put("MY_VAL_LIST", valList);
@@ -172,7 +178,7 @@ public class TableDataServiceImpl extends AbstractDbService {
             if (internalId == null || internalId.toString().trim().isEmpty()) {
                 return Result.error("删除失败：无法获取行唯一标识 (ROWID)");
             }
-            dbMapper.deleteByRowId(schema, tableName, internalId.toString());
+            tableDataMapper.deleteByRowId(schema, tableName, internalId.toString());
             return Result.success("删除成功");
         } catch (Exception e) {
             log.error("Delete failed", e);
@@ -190,7 +196,7 @@ public class TableDataServiceImpl extends AbstractDbService {
 
         for (int i = 0; i < rowIds.size(); i++) {
             try {
-                dbMapper.deleteByRowId(schema, tableName, rowIds.get(i));
+                tableDataMapper.deleteByRowId(schema, tableName, rowIds.get(i));
             } catch (Exception e) {
                 hasException = true;
                 exceptionMsg = e.getMessage();
@@ -202,19 +208,19 @@ public class TableDataServiceImpl extends AbstractDbService {
         if (hasException) {
             TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
             try {
-                String pkCol = dbMapper.getPkColumn(schema, tableName);
-                List<Map<String, String>> childTables = dbMapper.getAllChildTables(schema, tableName);
+                String pkCol = metadataMapper.getPkColumn(schema, tableName);
+                List<Map<String, String>> childTables = metadataMapper.getAllChildTables(schema, tableName);
                 if (pkCol != null && childTables != null && !childTables.isEmpty()) {
                     for (int i = failIndex; i < rowIds.size(); i++) {
                         String id = rowIds.get(i);
                         try {
-                            Map<String, Object> row = dbMapper.getDataByRowId(schema, tableName, id);
+                            Map<String, Object> row = tableDataMapper.getDataByRowId(schema, tableName, id);
                             if (row == null) continue;
                             Object pkVal = row.get(pkCol);
                             for (Map<String, String> child : childTables) {
                                 String cTable = child.get("TABLE_NAME");
                                 String cCol = child.get("COLUMN_NAME");
-                                int count = dbMapper.countReference(schema, cTable, cCol, pkVal);
+                                int count = tableDataMapper.countReference(schema, cTable, cCol, pkVal);
                                 if (count > 0) {
                                     String key = cTable + "|" + cCol;
                                     aggregatedConflicts.putIfAbsent(key, new HashMap<>());

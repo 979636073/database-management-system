@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.dmdb.mapper.TableDataMapper">
+
+    <select id="countData" resultType="long">
+        SELECT COUNT(1) FROM "${schema}"."${tableName}"
+    </select>
+
+    <select id="getDataPage" resultType="java.util.LinkedHashMap">
+        SELECT ROWIDTOCHAR(rowid) as DB_INTERNAL_ID, T.* FROM "${schema}"."${tableName}" T LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="getDataByRowId" resultType="java.util.LinkedHashMap">
+        SELECT ROWIDTOCHAR(rowid) as DB_INTERNAL_ID, T.* FROM "${schema}"."${tableName}" T WHERE rowid = '${rowId}'
+    </select>
+
+    <select id="countByConditions" resultType="long">
+        SELECT COUNT(1) FROM "${schema}"."${tableName}"
+        <where>
+            <foreach collection="conditions" item="cond">
+                <if test="logic == 'OR'"> OR </if><if test="logic == 'AND'"> AND </if>
+                "${cond.field}" ${cond.operator}
+                <if test="cond.operator != 'IS NULL' and cond.operator != 'IS NOT NULL'">
+                    <choose><when test="cond.operator == 'LIKE'">'%${cond.value}%'</when><otherwise>'${cond.value}'</otherwise></choose>
+                </if>
+            </foreach>
+        </where>
+    </select>
+
+    <select id="queryByConditionsPage" resultType="java.util.LinkedHashMap">
+        SELECT ROWIDTOCHAR(rowid) as DB_INTERNAL_ID, T.* FROM "${schema}"."${tableName}" T
+        <where>
+            <foreach collection="conditions" item="cond">
+                <if test="logic == 'OR'"> OR </if><if test="logic == 'AND'"> AND </if>
+                "${cond.field}" ${cond.operator}
+                <if test="cond.operator != 'IS NULL' and cond.operator != 'IS NOT NULL'">
+                    <choose><when test="cond.operator == 'LIKE'">'%${cond.value}%'</when><otherwise>'${cond.value}'</otherwise></choose>
+                </if>
+            </foreach>
+        </where>
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <insert id="insertData">
+        INSERT INTO "${schema}"."${tableName}"
+        <foreach collection="data.keys" item="key" open="(" separator="," close=")">"${key}"</foreach>
+        VALUES
+        <foreach collection="data.values" item="val" open="(" separator="," close=")">#{val}</foreach>
+    </insert>
+
+    <update id="updateByRowId">
+        UPDATE "${schema}"."${tableName}"
+        <set>
+            <foreach collection="data" item="val" index="key" separator=",">"${key}" = #{val}</foreach>
+        </set>
+        WHERE rowid = '${rowId}'
+    </update>
+
+    <delete id="deleteByRowId">
+        DELETE FROM "${schema}"."${tableName}" WHERE rowid = '${rowId}'
+    </delete>
+
+    <update id="updateTableField">UPDATE "${schema}"."${tableName}" SET "${column}" = #{newVal} WHERE "${column}" = #{oldVal}</update>
+
+    <select id="countReference" resultType="int">
+        SELECT COUNT(1) FROM "${schema}"."${tableName}" WHERE "${columnName}" = #{value}
+    </select>
+
+</mapper>

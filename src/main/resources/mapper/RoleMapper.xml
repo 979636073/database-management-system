@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.dmdb.mapper.RoleMapper">
+
+    <select id="getRoles" resultType="map" flushCache="true">
+        SELECT ROLE AS "ROLE_NAME" FROM DBA_ROLES ORDER BY ROLE
+    </select>
+
+    <select id="countRoleUsers" resultType="int">
+        SELECT COUNT(1) FROM DBA_ROLE_PRIVS WHERE GRANTED_ROLE = #{roleName}
+    </select>
+
+    <select id="getRoleRolePrivs" resultType="map" flushCache="true">
+        SELECT GRANTED_ROLE, ADMIN_OPTION FROM DBA_ROLE_PRIVS WHERE GRANTEE = #{roleName}
+    </select>
+
+    <select id="getRoleSysPrivs" resultType="map" flushCache="true">
+        SELECT PRIVILEGE, ADMIN_OPTION FROM DBA_SYS_PRIVS WHERE GRANTEE = #{roleName}
+    </select>
+
+    <select id="getRoleObjPrivs" resultType="map" flushCache="true">
+        SELECT
+            OWNER,
+            TABLE_NAME,
+            PRIVILEGE,
+            GRANTABLE
+        FROM DBA_TAB_PRIVS
+        WHERE GRANTEE = #{roleName}
+    </select>
+
+</mapper>
