@@ -7,7 +7,7 @@
     </select>
 
     <select id="getTablesBySchema" resultType="map">
-        SELECT TABLE_NAME, COMMENTS FROM ALL_TAB_COMMENTS WHERE OWNER = #{schema} AND TABLE_TYPE = 'TABLE'
+        SELECT TABLE_NAME, COMMENTS FROM ALL_TAB_COMMENTS WHERE OWNER = #{schema} AND TABLE_TYPE = 'TABLE' AND TABLE_NAME NOT LIKE 'SREF_CON_TAB%'
     </select>
 
     <select id="getColumns" resultType="map">
