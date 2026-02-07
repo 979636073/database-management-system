@@ -124,7 +124,17 @@
     <update id="updateTableField">UPDATE "${schema}"."${tableName}" SET "${column}" = #{newVal} WHERE "${column}" = #{oldVal}</update>
 
     <select id="getIndexes" resultType="map">
-        SELECT INDEX_NAME, INDEX_TYPE, UNIQUENESS, (SELECT LISTAGG(COLUMN_NAME, ',') WITHIN GROUP(ORDER BY COLUMN_POSITION) FROM ALL_IND_COLUMNS WHERE INDEX_OWNER = I.OWNER AND INDEX_NAME = I.INDEX_NAME) AS COLUMNS FROM ALL_INDEXES I WHERE TABLE_OWNER = #{schema} AND TABLE_NAME = #{tableName}
+        SELECT
+            I.INDEX_NAME,
+            I.INDEX_TYPE,
+            I.UNIQUENESS,
+            NVL((SELECT LISTAGG(C.COLUMN_NAME, ',') WITHIN GROUP(ORDER BY C.COLUMN_POSITION)
+                 FROM ALL_IND_COLUMNS C
+                 WHERE C.INDEX_OWNER = I.OWNER AND C.INDEX_NAME = I.INDEX_NAME), '') AS COLUMNS
+        FROM ALL_INDEXES I
+        WHERE I.TABLE_OWNER = #{schema}
+          AND I.TABLE_NAME = #{tableName}
+          AND I.GENERATED = 'N'
     </select>
 
     <select id="getForeignKeys" resultType="map">
@@ -156,13 +166,7 @@
     </select>
 
     <select id="getRoleObjPrivs" resultType="map" flushCache="true">
-        SELECT
-            OWNER,
-            TABLE_NAME,
-            PRIVILEGE,
-            GRANTABLE
-        FROM DBA_TAB_PRIVS
-        WHERE GRANTEE = #{roleName}
+        SELECT OWNER, TABLE_NAME, PRIVILEGE, GRANTABLE FROM DBA_TAB_PRIVS WHERE GRANTEE = #{roleName}
     </select>
 
 </mapper>
