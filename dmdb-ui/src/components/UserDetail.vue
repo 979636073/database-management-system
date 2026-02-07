@@ -27,16 +27,15 @@
 
         <div class="tabs-area">
             <el-tabs v-model="activeTab" type="border-card" class="stylish-tabs">
-
                 <el-tab-pane label="基本信息" name="general">
                     <div class="tab-content-pad">
                         <el-descriptions title="账户属性" :column="2" border>
                             <el-descriptions-item label="用户名">{{ userInfo.USERNAME }}</el-descriptions-item>
                             <el-descriptions-item label="账户状态">{{ userInfo.ACCOUNT_STATUS }}</el-descriptions-item>
                             <el-descriptions-item label="默认表空间"><el-tag size="small">{{ userInfo.DEFAULT_TABLESPACE
-                                    }}</el-tag></el-descriptions-item>
+                            }}</el-tag></el-descriptions-item>
                             <el-descriptions-item label="概要文件">{{ userInfo.PROFILE || 'DEFAULT'
-                                }}</el-descriptions-item>
+                            }}</el-descriptions-item>
                         </el-descriptions>
                         <div style="margin-top: 30px;">
                             <h4 style="margin-bottom: 15px; color: #606266;">配额管理</h4>
@@ -153,7 +152,7 @@
                                         <span class="label">当前对象：</span>
                                         <el-tag type="success" effect="dark" size="small">{{ selectedSchema }}.{{
                                             currentTable
-                                            }}</el-tag>
+                                        }}</el-tag>
                                     </div>
                                     <el-button type="primary" icon="el-icon-check" size="small" :loading="savingObj"
                                         @click="saveObjPrivs">应用权限</el-button>
@@ -164,7 +163,7 @@
                                     <el-table-column prop="name" label="操作类型">
                                         <template slot-scope="scope">
                                             <el-tag size="medium" effect="light" class="priv-name-tag">{{ scope.row.name
-                                                }}</el-tag>
+                                            }}</el-tag>
                                         </template>
                                     </el-table-column>
 
@@ -313,7 +312,9 @@ export default {
         async request(method, url, data = {}) {
             // 如果 url 以 /db 开头，则不做前缀处理（用于调用 metadata 接口）
             const realUrl = url.startsWith('/db/') ? url : '/db/users' + url;
-            return request({ method, url: realUrl, headers: { 'Conn-Id': this.connId }, [method === 'get' ? 'params' : 'data']: data });
+            // [修复1] 关键修改：DELETE 方法也应该使用 params 传参，以匹配后端 @RequestParam
+            const configKey = (method === 'get' || method === 'delete') ? 'params' : 'data';
+            return request({ method, url: realUrl, headers: { 'Conn-Id': this.connId }, [configKey]: data });
         },
 
         rowStyleHelper({ row }) { return row.granted ? { 'background-color': '#fdfdfd' } : {}; },
@@ -545,7 +546,24 @@ export default {
         // --- 杂项 ---
         async toggleLock() {
             const t = this.userInfo.ACCOUNT_STATUS === 'OPEN' ? 'LOCK' : 'UNLOCK';
-            try { await this.request('post', '/alter', { username: this.username, type: t }); this.$message.success("操作成功"); this.userInfo.ACCOUNT_STATUS = (t === 'UNLOCK' ? 'OPEN' : 'LOCKED'); } catch (e) { this.showError(e.message); }
+            try {
+                await this.request('post', '/alter', { username: this.username, type: t });
+                this.$message.success("操作成功");
+
+                // 更新本地状态
+                const newStatus = (t === 'UNLOCK' ? 'OPEN' : 'LOCKED');
+                this.userInfo.ACCOUNT_STATUS = newStatus;
+
+                // 触发状态变更事件，通知父组件更新左侧树
+                this.$emit('user-status-changed', {
+                    username: this.username,
+                    status: newStatus,
+                    connId: this.connId
+                });
+
+            } catch (e) {
+                this.showError(e.message);
+            }
         },
         async submitPwd() {
             if (!this.newPassword) return;
@@ -559,7 +577,18 @@ export default {
         },
         handleDelete() {
             this.$confirm(`确定删除用户 ${this.username} 吗？`, '警告', { type: 'warning' }).then(async () => {
-                try { await this.request('delete', '/delete', { username: this.username }); this.$message.success("删除成功"); this.$emit('user-deleted', this.username); } catch (e) { this.showError(e.message); }
+                try {
+                    const res = await this.request('delete', '/delete', { username: this.username });
+                    // [修复2] 必须检查后端返回状态码，防止假删除
+                    if (res.data.code === 200) {
+                        this.$message.success("删除成功");
+                        this.$emit('user-deleted', { username: this.username, connId: this.connId });
+                    } else {
+                        this.$message.error(res.data.msg || "删除失败");
+                    }
+                } catch (e) {
+                    this.showError(e.message);
+                }
             }).catch(() => { });
         }
     }
@@ -567,6 +596,7 @@ export default {
 </script>
 
 <style scoped>
+/* 样式保持不变 */
 .user-detail-container {
     height: 100%;
     background: #fff;
