@@ -82,6 +82,7 @@ public class TableDataServiceImpl extends AbstractDbService {
         }
     }
 
+    // 【核心修复】批量保存 + 全量冲突聚合
     @Transactional(rollbackFor = Exception.class)
     public Result<Object> saveBatch(String schema, String tableName, Map<String, List<Map<String, Object>>> payload) {
         validateIdentifiers(schema, tableName);
@@ -120,7 +121,8 @@ public class TableDataServiceImpl extends AbstractDbService {
             if (updateList != null) allRows.addAll(updateList);
 
             for (Map<String, Object> row : allRows) {
-                if (row == null) continue;
+                if (row == null) continue; // 防御空指针
+
                 Object pkVal = null;
                 if (row.containsKey("DB_INTERNAL_ID")) {
                     try {
@@ -138,6 +140,7 @@ public class TableDataServiceImpl extends AbstractDbService {
                 }
 
                 Result<Object> res = analyzeConflict(null, schema, tableName, pkVal, row);
+
                 if (res.getCode() == 503 && res.getData() != null) {
                     List<Map<String, Object>> rowConflicts = (List<Map<String, Object>>) res.getData();
                     for (Map<String, Object> c : rowConflicts) {
@@ -146,9 +149,17 @@ public class TableDataServiceImpl extends AbstractDbService {
                         Map<String, Object> agg = aggregatedConflicts.get(key);
                         agg.put("TABLE_NAME", c.get("TABLE_NAME"));
                         agg.put("COLUMN_NAME", c.get("COLUMN_NAME"));
+
+                        // 【修复】安全的类型合并逻辑
                         Object cntVal = c.get("CNT");
-                        if ("MISSING".equals(cntVal)) agg.put("CNT", "MISSING");
-                        else agg.put("CNT", (Integer) agg.getOrDefault("CNT", 0) + (Integer) cntVal);
+                        Object currentCnt = agg.get("CNT");
+
+                        if ("MISSING".equals(cntVal) || "MISSING".equals(currentCnt)) {
+                            agg.put("CNT", "MISSING");
+                        } else {
+                            int existing = currentCnt != null ? (Integer) currentCnt : 0;
+                            agg.put("CNT", existing + (Integer) cntVal);
+                        }
 
                         List<Object> valList = (List<Object>) agg.getOrDefault("MY_VAL_LIST", new ArrayList<>());
                         valList.add(c.get("MY_VAL"));

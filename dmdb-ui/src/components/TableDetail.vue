@@ -91,7 +91,7 @@
                     <div class="table-card">
                         <div class="data-toolbar">
                             <div class="tool-left" v-if="!isReadOnly">
-                                <el-button size="mini" icon="el-icon-plus" @click="handleAddRow">插入行</el-button>
+                                <el-button size="mini" icon="el-icon-plus" @click="handleAddRow()">插入行</el-button>
                                 <el-button size="mini" type="success" icon="el-icon-check" @click="submitBatchChanges"
                                     :disabled="!hasChanges" :loading="saving">保存修改</el-button>
                                 <el-button size="mini" icon="el-icon-close" @click="handleDiscardChanges"
@@ -232,35 +232,57 @@
             </div>
         </el-dialog>
 
-        <el-dialog :title="conflictTitle" :visible.sync="conflictVisible" width="750px" append-to-body
+        <el-dialog :title="conflictTitle" :visible.sync="conflictVisible" width="800px" append-to-body
             :close-on-click-modal="false">
-            <div class="conflict-alert"
-                :style="{ backgroundColor: isParentMissing ? '#fef0f0' : '#fdf6ec', color: isParentMissing ? '#F56C6C' : '#e6a23c', borderColor: isParentMissing ? '#fde2e2' : '#faecd8' }">
-                <i class="el-icon-warning" style="margin-right: 8px;"></i>
-                {{ conflictMessage }}
+            <div class="conflict-alert" :class="summaryStyle.class">
+                <i :class="summaryStyle.icon" style="margin-right: 8px;"></i>
+                <span>{{ conflictSummaryText }}</span>
             </div>
-            <el-table :data="conflictList" border size="small" style="margin-top: 15px;">
-                <el-table-column :label="isParentMissing ? '目标主表名' : '引用表名'" width="220" prop="TABLE_NAME">
-                    <template slot-scope="scope"><el-tag size="mini" type="info">{{ scope.row.TABLE_NAME
-                            }}</el-tag></template>
-                </el-table-column>
-                <el-table-column :label="isParentMissing ? '目标主键列' : '关联字段'" width="180"
-                    prop="COLUMN_NAME"></el-table-column>
-                <el-table-column :label="isParentMissing ? '状态' : '冲突记录数'" align="center" width="120">
+
+            <el-table :data="conflictList" border size="small" style="margin-top: 15px;"
+                :row-class-name="tableRowClassName">
+                <el-table-column label="类型" width="100" align="center">
                     <template slot-scope="scope">
-                        <span v-if="scope.row.CNT === 'MISSING'" style="color:#F56C6C;font-weight:bold;">主键缺失</span>
-                        <span v-else style="color:#F56C6C;font-weight:bold;">{{ scope.row.CNT }}</span>
+                        <el-tag v-if="scope.row.CNT === 'MISSING'" type="danger" size="mini" effect="dark"><i
+                                class="el-icon-error"></i> 缺主键</el-tag>
+                        <el-tag v-else type="warning" size="mini" effect="dark"><i class="el-icon-connection"></i>
+                            被引用</el-tag>
                     </template>
                 </el-table-column>
-                <el-table-column label="操作" align="center">
+
+                <el-table-column label="涉及对象" min-width="180">
                     <template slot-scope="scope">
-                        <el-button type="primary" plain size="mini" @click="resolveConflict(scope.row)">
-                            去处理 <i class="el-icon-right"></i>
+                        <div><span style="color:#909399;font-size:12px;">表：</span><el-tag size="mini" type="info"
+                                style="font-weight:bold;">{{ scope.row.TABLE_NAME }}</el-tag></div>
+                        <div style="margin-top:4px;"><span style="color:#909399;font-size:12px;">列：</span><b>{{
+                                scope.row.COLUMN_NAME }}</b></div>
+                    </template>
+                </el-table-column>
+
+                <el-table-column label="冲突详情" min-width="280">
+                    <template slot-scope="scope">
+                        <div v-if="scope.row.CNT === 'MISSING'">
+                            目标表不存在以下 <b>{{ scope.row.MY_VAL_LIST ? scope.row.MY_VAL_LIST.length : 1 }}</b> 个主键值，无法插入。
+                        </div>
+                        <div v-else>
+                            当前记录被子表引用了 <b>{{ scope.row.CNT }}</b> 次，必须先处理子表数据。
+                        </div>
+                        <div style="margin-top:5px;font-size:12px;color:#909399;">
+                            涉及值: {{ formatValList(scope.row.MY_VAL_LIST) }}
+                        </div>
+                    </template>
+                </el-table-column>
+
+                <el-table-column label="解决方案" width="130" align="center">
+                    <template slot-scope="scope">
+                        <el-button :type="scope.row.CNT === 'MISSING' ? 'danger' : 'warning'" size="mini" plain
+                            @click="resolveConflict(scope.row)">
+                            {{ scope.row.CNT === 'MISSING' ? '去父表补充' : '去子表处理' }} <i class="el-icon-right"></i>
                         </el-button>
                     </template>
                 </el-table-column>
             </el-table>
-            <div slot="footer"><el-button @click="conflictVisible = false">关闭</el-button></div>
+            <div slot="footer"><el-button @click="conflictVisible = false">关 闭</el-button></div>
         </el-dialog>
 
         <el-dialog title="DDL 预览" :visible.sync="ddlVisible" width="800px" append-to-body>
@@ -377,7 +399,7 @@ import request from '@/utils/request';
 import G6 from '@antv/g6';
 import SqlEditor from './SqlEditor.vue';
 
-// G6 logic remains same
+// G6 Node Registration
 G6.registerNode('db-table', {
     draw: (cfg, group) => {
         const { label, tableComment, columns = [], isCenter, isTruncated, totalColCount } = cfg;
@@ -443,10 +465,9 @@ export default {
             editViewVisible: false, viewSql: '',
             isSimpleView: true,
 
-            // 标记是否从冲突跳转
+            // 冲突跳转标记
             jumpFromConflict: false,
-
-            // 【新增】选中的行
+            // 选中的行（用于批量删除）
             selectedRows: [],
 
             designVisible: false, designActiveTab: 'columns',
@@ -471,13 +492,33 @@ export default {
         isParentMissing() {
             return this.conflictList.length > 0 && this.conflictList[0].CNT === 'MISSING';
         },
-        conflictTitle() {
-            if (this.isParentMissing) return '⚠️ 保存失败：目标主键缺失';
-            return this.conflictType === 'delete' ? '⚠️ 无法删除：存在关联引用' : '⚠️ 无法修改：存在关联引用';
+        // 混合冲突判断
+        hasMixedConflict() {
+            if (!this.conflictList.length) return false;
+            const hasMissing = this.conflictList.some(c => c.CNT === 'MISSING');
+            const hasRef = this.conflictList.some(c => c.CNT !== 'MISSING');
+            return hasMissing && hasRef;
         },
-        conflictMessage() {
-            if (this.isParentMissing) return '您输入的 外键值 在目标主表中不存在。请先在主表中创建该数据，或修改为已存在的值。';
-            return `该记录被以下 ${this.conflictList.length} 张表引用，请先处理这些关联数据。`;
+        conflictTitle() {
+            if (this.hasMixedConflict) return '⚠️ 批量操作存在多类冲突';
+            if (this.isParentMissing) return '⚠️ 保存失败：目标主键缺失';
+            return '⚠️ 操作受阻：存在数据引用';
+        },
+        conflictSummaryText() {
+            const missingCount = this.conflictList.filter(c => c.CNT === 'MISSING').length;
+            const refCount = this.conflictList.filter(c => c.CNT !== 'MISSING').length;
+            if (this.hasMixedConflict) {
+                return `检测到混合冲突：有 ${missingCount} 项外键在父表中不存在，且有 ${refCount} 项记录正被子表引用。请分别处理。`;
+            } else if (missingCount > 0) {
+                return `检测到 ${missingCount} 处外键依赖缺失，请前往父表补充对应数据。`;
+            } else {
+                return `检测到 ${refCount} 处引用约束，以下数据正被其他表使用，无法直接删除或修改。`;
+            }
+        },
+        summaryStyle() {
+            if (this.hasMixedConflict) return { class: 'conflict-mixed', icon: 'el-icon-warning' };
+            if (this.isParentMissing) return { class: 'conflict-missing', icon: 'el-icon-error' };
+            return { class: 'conflict-ref', icon: 'el-icon-connection' };
         }
     },
 
@@ -489,7 +530,7 @@ export default {
             handler(val) {
                 if (val && val.field && val.value !== undefined) {
                     if (this.viewMode !== 'data') this.handleViewModeSwitch('data');
-                    // 标记从外部跳转
+                    // 标记从外部跳转，并执行查询
                     this.jumpFromConflict = true;
                     this.applyAutoFilter(val);
                 }
@@ -504,9 +545,9 @@ export default {
                     this.currentPage = 1;
                     this.expandedTableList = [];
                     this.showAllColumns = false;
-                    this.selectedRows = []; // 清空选中
+                    this.selectedRows = [];
 
-                    // 如果有跳转条件，跳过普通加载
+                    // 如果有 initialFilter，则跳过普通 loadData，交给 initialFilter watcher
                     if (this.initialFilter && this.initialFilter.field) {
                         return;
                     }
@@ -567,24 +608,36 @@ export default {
                 this.tableColumns = colRes.data.data || [];
                 let list = []; let total = 0;
                 const params = { schema: this.currentSchema, tableName: this.activeTable, page: this.currentPage, size: this.pageSize };
+
                 if (this.conditions.length > 0) {
                     const filterRes = await this.request('post', '/filter', { ...params, logic: this.logicalOperator, conditions: this.conditions });
-                    list = filterRes.data.data.list || []; total = filterRes.data.data.total || 0; if (filterRes.data.data.isView) { this.isSimpleView = filterRes.data.data.isSimpleView; }
+                    list = filterRes.data.data.list || [];
+                    total = filterRes.data.data.total || 0;
+                    if (filterRes.data.data.isView) {
+                        this.isSimpleView = filterRes.data.data.isSimpleView;
+                    }
                 } else {
                     const dataRes = await this.request('get', '/data', params);
-                    list = dataRes.data.data.list || []; total = dataRes.data.data.total || 0; if (dataRes.data.data.isView) { this.isSimpleView = dataRes.data.data.isSimpleView; }
+                    list = dataRes.data.data.list || [];
+                    total = dataRes.data.data.total || 0;
+                    if (dataRes.data.data.isView) {
+                        this.isSimpleView = dataRes.data.data.isSimpleView;
+                    }
                 }
-                this.currentDataList = list; this.totalCount = total; this.originalDataMap = {}; list.forEach(row => { if (row.DB_INTERNAL_ID) this.originalDataMap[row.DB_INTERNAL_ID] = JSON.parse(JSON.stringify(row)); });
+                this.currentDataList = list;
+                this.totalCount = total;
+                this.originalDataMap = {};
+                list.forEach(row => { if (row.DB_INTERNAL_ID) this.originalDataMap[row.DB_INTERNAL_ID] = JSON.parse(JSON.stringify(row)); });
 
-                // 【核心优化】从冲突跳转来且无数据 -> 批量自动插入
+                // 【核心逻辑】从冲突跳转来且无数据 -> 自动批量插入
                 if (this.jumpFromConflict && this.totalCount === 0) {
                     this.jumpFromConflict = false;
                     this.$nextTick(() => {
-                        // 遍历所有过滤条件，如果存在多个 OR 条件，生成多行
+                        // 1. 如果是 OR 多值筛选，生成多行
                         if (this.conditions.length > 0 && this.logicalOperator === 'OR') {
                             let addedCount = 0;
                             this.conditions.forEach(cond => {
-                                if (cond.operator === '=' && cond.value) {
+                                if (cond.operator === '=' && (cond.value || cond.value === 0)) {
                                     this.handleAddRow(cond.value, cond.field);
                                     addedCount++;
                                 }
@@ -592,16 +645,23 @@ export default {
                             if (addedCount > 0) {
                                 this.$message({ message: `已为您批量创建 ${addedCount} 条新行并填入缺失的主键，请补充其他信息。`, type: 'success', duration: 6000, showClose: true });
                             }
-                        } else {
-                            // 单条件情况
+                        }
+                        // 2. 单一条件，生成一行
+                        else {
                             this.handleAddRow();
                             this.$message({ message: '未找到指定主键记录，已自动为您创建新行并填入主键，请补充其他信息。', type: 'success', duration: 5000, showClose: true });
                         }
+
+                        // 【新增】强制重新布局，防止表格渲染错位
+                        if (this.$refs.dataTable) this.$refs.dataTable.doLayout();
                     });
                 } else if (this.totalCount > 0) {
                     this.jumpFromConflict = false;
                 }
-            } catch (e) { this.handleError(e, '数据加载失败'); } finally { this.loading = false; }
+
+            } catch (e) {
+                this.handleError(e, '数据加载失败');
+            } finally { this.loading = false; }
         },
 
         async handleEditView() {
@@ -642,24 +702,31 @@ export default {
         finishEditing(row, colName) { this.editingCell = null; const id = row.DB_INTERNAL_ID; if (!id) return; const originalRow = this.originalDataMap[id]; let newVal = row[colName]; let oldVal = originalRow ? originalRow[colName] : ''; if (newVal == null) newVal = ''; if (oldVal == null) oldVal = ''; if (String(newVal) !== String(oldVal)) { this.modifiedRows.add(id); this.modifiedRows = new Set(this.modifiedRows); } },
         getCellStyle({ row, column }) { const id = row.DB_INTERNAL_ID; const col = column.property; if (!id && row._tempId) return { backgroundColor: '#f0f9eb' }; if (this.modifiedRows.has(id)) { const original = this.originalDataMap[id]; let newVal = row[col]; let oldVal = original ? original[col] : ''; if (newVal == null) newVal = ''; if (oldVal == null) oldVal = ''; if (String(newVal) !== String(oldVal)) return { backgroundColor: '#fdf6ec', color: '#E6A23C', fontWeight: 'bold' }; } return {}; },
 
-        // 【核心修改】支持参数化填充
+        // 【核心修复】支持参数化填充 + 字段名不区分大小写匹配
         handleAddRow(prefillValue = null, prefillField = null) {
             const newRow = { _tempId: 'NEW_' + Date.now() + Math.random().toString(36).substr(2, 5) };
             this.tableColumns.forEach(c => newRow[c.COLUMN_NAME] = null);
 
             // 优先使用传入的填充值
             if (prefillValue !== null && prefillField) {
-                newRow[prefillField] = prefillValue;
+                // 使用 find 查找 key，忽略大小写，确保填入正确的列属性
+                const matchKey = Object.keys(newRow).find(k => k.toUpperCase() === prefillField.toUpperCase());
+                if (matchKey) {
+                    newRow[matchKey] = prefillValue;
+                }
             }
             // 否则使用当前的筛选条件 (单条件)
             else if (this.conditions.length === 1 && this.conditions[0].operator === '=') {
                 const fieldName = this.conditions[0].field;
                 const val = this.conditions[0].value;
                 const matchKey = Object.keys(newRow).find(k => k.toUpperCase() === fieldName.toUpperCase());
+
+                // 支持 0 值填充
                 if (matchKey && val !== undefined && val !== null) {
                     newRow[matchKey] = val;
                 }
             }
+
             this.currentDataList.unshift(newRow);
             this.newRows.push(newRow);
         },
@@ -680,7 +747,7 @@ export default {
 
             const insertList = this.newRows.map(row => {
                 const clean = this.getCleanRowData(row);
-                delete clean.DB_INTERNAL_ID;
+                delete clean.DB_INTERNAL_ID; // 插入不需要 ID
                 return clean;
             });
 
@@ -709,6 +776,7 @@ export default {
                     this.$message.success('批量保存成功！');
                     this.loadData();
                 } else if (res.data.code === 503) {
+                    // 503 冲突处理
                     this.conflictList = res.data.data;
                     this.conflictType = 'save';
                     this.conflictVisible = true;
@@ -738,58 +806,12 @@ export default {
             }
         },
 
-        // 【新增】选区变更
-        handleSelectionChange(val) {
-            this.selectedRows = val;
-        },
-
-        // 【新增】批量删除方法
-        async handleBatchDelete() {
-            if (this.selectedRows.length === 0) return;
-            const existRowsToDelete = this.selectedRows.filter(row => row.DB_INTERNAL_ID).map(row => row.DB_INTERNAL_ID);
-            const newRowsToDelete = this.selectedRows.filter(row => !row.DB_INTERNAL_ID);
-
-            this.$confirm(`确定要删除选中的 ${this.selectedRows.length} 条数据吗？`, '批量删除', { type: 'warning' }).then(async () => {
-                // 1. 先删本地新行
-                newRowsToDelete.forEach(row => {
-                    const idx = this.currentDataList.indexOf(row);
-                    if (idx > -1) this.currentDataList.splice(idx, 1);
-                    const nIdx = this.newRows.indexOf(row);
-                    if (nIdx > -1) this.newRows.splice(nIdx, 1);
-                });
-
-                // 2. 再调后端删持久化行
-                if (existRowsToDelete.length > 0) {
-                    const loadingInstance = this.$loading({ lock: true, text: '正在批量删除...', background: 'rgba(0,0,0,0.7)' });
-                    try {
-                        const res = await this.request('post', `/delete/batch?schema=${this.currentSchema}&tableName=${this.activeTable}`, existRowsToDelete);
-                        loadingInstance.close();
-
-                        if (res.data.code === 200) {
-                            this.$message.success('批量删除成功');
-                            this.loadData();
-                        } else if (res.data.code === 503) {
-                            this.conflictList = res.data.data;
-                            this.conflictType = 'delete';
-                            this.conflictVisible = true;
-                        } else {
-                            throw new Error(res.data.msg);
-                        }
-                    } catch (e) {
-                        loadingInstance.close();
-                        this.handleError(e, '批量删除失败');
-                    }
-                } else {
-                    this.$message.success('删除成功');
-                }
-            }).catch(() => { });
-        },
-
         addCondition() { if (this.tableColumns.length > 0) this.conditions.push({ field: this.tableColumns[0].COLUMN_NAME, operator: '=', value: '' }); },
         removeCondition(index) { this.conditions.splice(index, 1); },
         handleQuery() { this.currentPage = 1; this.loadData(); },
         resetFilters() { this.conditions = []; this.handleQuery(); },
-        // 【核心修复】自动筛选：支持多值 (OR)
+
+        // 【核心修改】支持数组值 -> 生成 OR 条件
         applyAutoFilter(filter) {
             if (Array.isArray(filter.value)) {
                 this.conditions = filter.value.map(v => ({
@@ -801,14 +823,16 @@ export default {
             } else {
                 this.conditions = [{ field: filter.field, operator: '=', value: filter.value }];
             }
-            this.$nextTick(() => { this.handleQuery(); });
+            this.$nextTick(() => {
+                this.handleQuery();
+            });
         },
 
-        // 【核心修复】处理聚合冲突列表
+        // 冲突跳转处理
         resolveConflict(row) {
             this.conflictVisible = false;
 
-            // 优先使用聚合值列表
+            // 优先使用 MY_VAL_LIST
             let filterValue = [];
             if (row.MY_VAL_LIST && row.MY_VAL_LIST.length > 0) {
                 filterValue = row.MY_VAL_LIST;
@@ -825,10 +849,77 @@ export default {
                 initViewMode: 'data',
                 filter: {
                     field: row.COLUMN_NAME,
-                    value: filterValue // 传数组
+                    value: filterValue
                 }
             });
         },
+
+        // 处理 Selection Change
+        handleSelectionChange(val) {
+            this.selectedRows = val;
+        },
+
+        // 批量删除
+        async handleBatchDelete() {
+            if (this.selectedRows.length === 0) return;
+
+            const existRowsToDelete = this.selectedRows.filter(row => row.DB_INTERNAL_ID).map(row => row.DB_INTERNAL_ID);
+            const newRowsToDelete = this.selectedRows.filter(row => !row.DB_INTERNAL_ID);
+
+            this.$confirm(`确定要删除选中的 ${this.selectedRows.length} 条数据吗？`, '批量删除', {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                type: 'warning'
+            }).then(async () => {
+                // 1. 先移除本地的新行
+                if (newRowsToDelete.length > 0) {
+                    newRowsToDelete.forEach(row => {
+                        const idx = this.currentDataList.indexOf(row);
+                        if (idx > -1) this.currentDataList.splice(idx, 1);
+                        const newIdx = this.newRows.indexOf(row);
+                        if (newIdx > -1) this.newRows.splice(newIdx, 1);
+                    });
+                }
+
+                // 2. 调用后端删除已存在的行
+                if (existRowsToDelete.length > 0) {
+                    const loadingInstance = this.$loading({ lock: true, text: '正在批量删除中...', background: 'rgba(0, 0, 0, 0.7)' });
+                    try {
+                        const res = await this.request('post', `/delete/batch?schema=${this.currentSchema}&tableName=${this.activeTable}`, existRowsToDelete);
+                        loadingInstance.close();
+                        if (res.data.code === 200) {
+                            this.$message.success('批量删除成功');
+                            this.loadData();
+                        } else if (res.data.code === 503) {
+                            this.conflictList = res.data.data;
+                            this.conflictType = 'delete';
+                            this.conflictVisible = true;
+                        } else {
+                            throw new Error(res.data.msg);
+                        }
+                    } catch (e) {
+                        loadingInstance.close();
+                        this.handleError(e, '批量删除失败');
+                    }
+                } else {
+                    this.$message.success('删除成功');
+                    this.selectedRows = [];
+                }
+            }).catch(() => { });
+        },
+
+        // 格式化显示冲突值
+        formatValList(list) {
+            if (!list || list.length === 0) return '';
+            const preview = list.slice(0, 3).join(', ');
+            return list.length > 3 ? `${preview} ...等 ${list.length} 个` : preview;
+        },
+
+        // 冲突行样式
+        tableRowClassName({ row }) {
+            return row.CNT === 'MISSING' ? 'row-missing' : 'row-ref';
+        },
+
         async handleShowDDL() {
             try {
                 const res = await this.request('get', '/ddl', { schema: this.currentSchema, tableName: this.activeTable });
@@ -1163,7 +1254,6 @@ export default {
 </script>
 
 <style scoped>
-/* 保持原有样式，省略以节省空间，与提供的 TableDetail.vue 原始样式一致 */
 .table-detail-wrapper {
     height: 100%;
     display: flex;
@@ -1380,14 +1470,43 @@ export default {
 }
 
 .conflict-alert {
-    background: #fdf6ec;
-    color: #e6a23c;
-    padding: 12px 15px;
+    padding: 12px 16px;
     border-radius: 4px;
+    font-size: 14px;
+    margin-bottom: 15px;
     display: flex;
     align-items: center;
-    font-size: 14px;
+}
+
+/* 缺失主键 - 红色系 */
+.conflict-missing {
+    background-color: #fef0f0;
+    color: #f56c6c;
+    border: 1px solid #fde2e2;
+}
+
+/* 被引用 - 橙色系 */
+.conflict-ref {
+    background-color: #fdf6ec;
+    color: #e6a23c;
     border: 1px solid #faecd8;
+}
+
+/* 混合冲突 - 紫色系或深色警告 */
+.conflict-mixed {
+    background-color: #f4f4f5;
+    color: #909399;
+    border: 1px solid #dcdfe6;
+    font-weight: bold;
+}
+
+/* 表格行微调 */
+::v-deep .el-table .row-missing {
+    background: #fffafa;
+}
+
+::v-deep .el-table .row-ref {
+    background: #fcfcfc;
 }
 
 .relation-view-container {
