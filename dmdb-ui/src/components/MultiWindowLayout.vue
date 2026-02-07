@@ -96,7 +96,7 @@
           <RoleDetail v-else-if="item.type === 'role'" :conn-id="item.connId" :role-name="item.roleName" />
 
           <UserDetail v-else-if="item.type === 'user'" :conn-id="item.connId" :username="item.username"
-            @user-deleted="handleUserDeleted" />
+            @user-deleted="handleUserDeleted" @user-status-changed="handleUserStatusChange" />
 
         </el-tab-pane>
       </el-tabs>
@@ -547,9 +547,51 @@ export default {
       this.tabs = tabs.filter((tab) => tab.key !== targetName);
     },
 
-    handleUserDeleted(username) {
+    // [新增] 辅助方法：在树中查找特定的用户节点
+    findUserNode(connId, username) {
+      // 1. 获取连接节点 (Root Node)
+      const connNode = this.$refs.tree.getNode(connId);
+      if (!connNode) return null;
+
+      // 2. 查找 "用户" 文件夹节点 (Folder Node)
+      const userFolder = connNode.childNodes.find(n => n.data.type === 'folder_user');
+      // 如果文件夹未展开或未加载，则无需更新视图
+      if (!userFolder || !userFolder.loaded) return null;
+
+      // 3. 查找具体的用户节点
+      const userNode = userFolder.childNodes.find(n => n.data.label === username);
+      return userNode;
+    },
+
+    // [新增] 处理用户状态变更（锁定/解锁）
+    handleUserStatusChange({ username, status, connId }) {
+      const node = this.findUserNode(connId, username);
+      if (node) {
+        // 直接修改节点数据的属性，Vue 会响应式更新图标颜色
+        node.data.status = status;
+      }
+    },
+
+    // [修改] 处理用户删除
+    handleUserDeleted(payload) {
+      let username, connId;
+      if (typeof payload === 'object') {
+        username = payload.username;
+        connId = payload.connId;
+      } else {
+        username = payload;
+      }
+
       const targetTab = this.tabs.find(t => t.type === 'user' && t.username === username);
       if (targetTab) this.removeTab(targetTab.key);
+
+      // 从左侧树中移除节点
+      if (connId) {
+        const node = this.findUserNode(connId, username);
+        if (node) {
+          this.$refs.tree.remove(node);
+        }
+      }
     },
 
     openCreateDialog(node, data) {
