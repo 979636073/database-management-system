@@ -315,12 +315,27 @@
                             </template>
                         </el-table-column>
 
-                        <el-table-column label="长度/精度" width="110">
+                        <el-table-column label="长度/精度" width="100">
                             <template slot-scope="scope">
                                 <el-input v-model="scope.row.DATA_LENGTH" @change="markModified(scope.row)" size="mini"
                                     :disabled="isLengthDisabled(scope.row.DATA_TYPE)"
                                     :placeholder="getLengthPlaceholder(scope.row.DATA_TYPE)">
                                 </el-input>
+                            </template>
+                        </el-table-column>
+
+                        <el-table-column label="标度" width="80">
+                            <template slot-scope="scope">
+                                <el-input v-model="scope.row.DATA_SCALE" @change="markModified(scope.row)" size="mini"
+                                    :disabled="isScaleDisabled(scope.row.DATA_TYPE)" placeholder="0">
+                                </el-input>
+                            </template>
+                        </el-table-column>
+
+                        <el-table-column label="默认值" width="120">
+                            <template slot-scope="scope">
+                                <el-input v-model="scope.row.DATA_DEFAULT" @change="markModified(scope.row)" size="mini"
+                                    placeholder="无"></el-input>
                             </template>
                         </el-table-column>
 
@@ -403,7 +418,6 @@
 </template>
 
 <script>
-// ... G6 Node Definition and Constants remain unchanged ...
 import request from '@/utils/request';
 import G6 from '@antv/g6';
 import SqlEditor from './SqlEditor.vue';
@@ -443,6 +457,7 @@ const DM_DATA_TYPES = [
 ];
 
 const NO_LENGTH_TYPES = ['INT', 'INTEGER', 'BIGINT', 'TINYINT', 'SMALLINT', 'BYTE', 'DATE', 'TIME', 'TIMESTAMP', 'CLOB', 'BLOB', 'TEXT', 'LONG', 'BOOLEAN'];
+const SCALE_TYPES = ['NUMBER', 'DECIMAL', 'NUMERIC', 'FLOAT', 'DOUBLE', 'REAL'];
 
 export default {
     name: 'TableDetail',
@@ -481,7 +496,7 @@ export default {
             sqlConfirmVisible: false, generatedSql: '', altering: false
         };
     },
-    // ... Computed ...
+
     computed: {
         rawKeys() { return this.currentDataList.length ? Object.keys(this.currentDataList[0]).filter(k => k !== 'DB_INTERNAL_ID') : []; },
         hasChanges() { return this.modifiedRows.size > 0 || this.newRows.length > 0; },
@@ -604,7 +619,7 @@ export default {
             this.editCommentVisible = true;
         },
 
-        // [修改] 提交注释并通知父组件同步
+        // 提交注释并通知父组件同步
         async submitComment() {
             this.altering = true;
             try {
@@ -615,7 +630,6 @@ export default {
                     this.$message.success('注释更新成功');
                     this.tableComment = this.newComment;
                     this.editCommentVisible = false;
-                    // 【关键修改】通知父组件更新左侧目录树
                     this.$emit('table-comment-change', this.newComment);
                 } else {
                     throw new Error(res.data.msg);
@@ -671,7 +685,6 @@ export default {
             } catch (e) { this.handleError(e, '数据加载失败'); } finally { this.loading = false; }
         },
 
-        // ... Other existing methods (handleEditView, submitViewAlter, etc.) ...
         async handleEditView() {
             try {
                 const res = await this.request('get', '/ddl', { schema: this.currentSchema, tableName: this.activeTable });
@@ -701,9 +714,27 @@ export default {
         finishEditing(row, colName) { this.editingCell = null; const id = row.DB_INTERNAL_ID; if (!id) return; const originalRow = this.originalDataMap[id]; let newVal = row[colName]; let oldVal = originalRow ? originalRow[colName] : ''; if (newVal == null) newVal = ''; if (oldVal == null) oldVal = ''; if (String(newVal) !== String(oldVal)) { this.modifiedRows.add(id); this.modifiedRows = new Set(this.modifiedRows); } },
         getCellStyle({ row, column }) { const id = row.DB_INTERNAL_ID; const col = column.property; if (!id && row._tempId) return { backgroundColor: '#f0f9eb' }; if (this.modifiedRows.has(id)) { const original = this.originalDataMap[id]; let newVal = row[col]; let oldVal = original ? original[col] : ''; if (newVal == null) newVal = ''; if (oldVal == null) oldVal = ''; if (String(newVal) !== String(oldVal)) return { backgroundColor: '#fdf6ec', color: '#E6A23C', fontWeight: 'bold' }; } return {}; },
 
+        // [修改] 插入新行时，优先使用 DATA_DEFAULT
         handleAddRow(prefillValue = null, prefillField = null) {
             const newRow = { _tempId: 'NEW_' + Date.now() + Math.random().toString(36).substr(2, 5) };
-            this.tableColumns.forEach(c => newRow[c.COLUMN_NAME] = null);
+
+            this.tableColumns.forEach(c => {
+                let defVal = null;
+                if (c.DATA_DEFAULT !== undefined && c.DATA_DEFAULT !== null) {
+                    // 清理默认值：去除两端的单引号
+                    let rawDefault = String(c.DATA_DEFAULT).trim();
+                    if (rawDefault.startsWith("'") && rawDefault.endsWith("'")) {
+                        defVal = rawDefault.substring(1, rawDefault.length - 1);
+                    } else if (!isNaN(rawDefault)) {
+                        // 如果是纯数字，直接使用
+                        defVal = rawDefault;
+                    }
+                    // 注意：如果是函数（如 SYSDATE），直接填入可能会导致前端组件报错或保存失败，
+                    // 这里暂且只处理字面量。
+                }
+                newRow[c.COLUMN_NAME] = defVal;
+            });
+
             if (prefillValue !== null && prefillField) {
                 const matchKey = Object.keys(newRow).find(k => k.toUpperCase() === prefillField.toUpperCase());
                 if (matchKey) newRow[matchKey] = prefillValue;
@@ -813,18 +844,42 @@ export default {
             } catch (e) { this.handleError(e, '获取DDL失败'); }
         },
 
-        // --- 设计器相关方法 (务必保留) ---
+        // --- 设计器相关方法 ---
         async handleDesignTable() {
             try {
                 const colRes = await this.request('get', '/columns', { schema: this.currentSchema, tableName: this.activeTable });
                 const cols = colRes.data.data;
-                this.originalColumns = JSON.parse(JSON.stringify(cols.map(c => ({
-                    ...c,
-                    DATA_LENGTH: c.DATA_LENGTH ? String(c.DATA_LENGTH) : '',
-                    COMMENTS: c.COMMENTS || '',
-                    DATA_DEFAULT: c.DATA_DEFAULT || '',
-                    IS_PK: ['1', 1, 'Y', 'y', 'true', true].includes(c.IS_PK)
-                }))));
+                // [核心修改] 映射列信息，区分 length 和 scale
+                this.originalColumns = JSON.parse(JSON.stringify(cols.map(c => {
+                    let len = '';
+                    let scale = '';
+                    const type = c.DATA_TYPE ? c.DATA_TYPE.toUpperCase() : '';
+
+                    // 1. 数值类型：优先使用精度和标度
+                    if (['NUMBER', 'DECIMAL', 'NUMERIC', 'FLOAT', 'DOUBLE', 'REAL'].includes(type)) {
+                        len = c.DATA_PRECISION !== null ? String(c.DATA_PRECISION) : '';
+                        scale = c.DATA_SCALE !== null ? String(c.DATA_SCALE) : '';
+                    }
+                    // 2. 无长度类型 (INTEGER, DATE 等)：置空
+                    else if (NO_LENGTH_TYPES.includes(type)) {
+                        len = '';
+                        scale = '';
+                    }
+                    // 3. 字符类型：使用 DATA_LENGTH
+                    else {
+                        len = c.DATA_LENGTH ? String(c.DATA_LENGTH) : '';
+                        scale = '';
+                    }
+
+                    return {
+                        ...c,
+                        DATA_LENGTH: len,
+                        DATA_SCALE: scale, // 新增 scale 字段
+                        COMMENTS: c.COMMENTS || '',
+                        DATA_DEFAULT: c.DATA_DEFAULT || '',
+                        IS_PK: ['1', 1, 'Y', 'y', 'true', true].includes(c.IS_PK)
+                    };
+                })));
                 this.designColumns = JSON.parse(JSON.stringify(this.originalColumns)).map(c => ({ ...c, _status: 'original', _originalName: c.COLUMN_NAME }));
                 try {
                     const idxRes = await this.request('get', '/indexes', { schema: this.currentSchema, tableName: this.activeTable });
@@ -857,18 +912,49 @@ export default {
         handleRefTableChange(row) { row.R_COLUMN_NAME = ''; if (row.R_TABLE_NAME) this.loadRefColumns(row.R_TABLE_NAME); },
         isDiff(newVal, oldVal) { const n = (newVal === null || newVal === undefined) ? "" : String(newVal).trim(); const o = (oldVal === null || oldVal === undefined) ? "" : String(oldVal).trim(); return n !== o; },
 
-        addDesignColumn() { this.designColumns.push({ COLUMN_NAME: 'NEW_COL', DATA_TYPE: 'VARCHAR2', DATA_LENGTH: '50', NULLABLE: 'Y', IS_PK: false, _status: 'new' }); },
+        addDesignColumn() {
+            this.designColumns.push({
+                COLUMN_NAME: '',
+                DATA_TYPE: 'VARCHAR2',
+                DATA_LENGTH: '50',
+                DATA_SCALE: '', // 初始化 scale
+                DATA_DEFAULT: '',
+                NULLABLE: 'Y',
+                IS_PK: false,
+                _status: 'new'
+            });
+        },
         removeDesignColumn(index, row) { if (row._status !== 'new') this.deleteColumnList.push(row.COLUMN_NAME); this.designColumns.splice(index, 1); },
 
         isLengthDisabled(type) { if (!type) return false; return NO_LENGTH_TYPES.includes(type.toUpperCase()); },
-        getLengthPlaceholder(type) { if (!type) return ''; const t = type.toUpperCase(); if (NO_LENGTH_TYPES.includes(t)) return '无'; if (['NUMBER', 'DECIMAL', 'NUMERIC', 'FLOAT', 'DOUBLE', 'REAL'].includes(t)) return '精度,标度'; return '长度'; },
+        // [新增] 判断标度是否禁用
+        isScaleDisabled(type) {
+            if (!type) return true;
+            return !SCALE_TYPES.includes(type.toUpperCase());
+        },
+
+        getLengthPlaceholder(type) {
+            if (!type) return '';
+            const t = type.toUpperCase();
+            if (NO_LENGTH_TYPES.includes(t)) return '无';
+            return '长度';
+        },
+
         handleTypeChange(row) { if (this.isLengthDisabled(row.DATA_TYPE)) { row.DATA_LENGTH = ''; } this.markModified(row); },
 
         markModified(row) {
             if (row._status === 'new') return;
             const original = this.originalColumns.find(o => o.COLUMN_NAME === row._originalName);
             if (!original) return;
-            const isChanged = this.isDiff(row.COLUMN_NAME, original.COLUMN_NAME) || this.isDiff(row.DATA_TYPE, original.DATA_TYPE) || this.isDiff(row.DATA_LENGTH, original.DATA_LENGTH) || (row.IS_PK !== original.IS_PK) || this.isDiff(row.NULLABLE, original.NULLABLE) || this.isDiff(row.DATA_DEFAULT, original.DATA_DEFAULT) || this.isDiff(row.COMMENTS, original.COMMENTS);
+            // [修改] 增加 DATA_SCALE 的对比
+            const isChanged = this.isDiff(row.COLUMN_NAME, original.COLUMN_NAME) ||
+                this.isDiff(row.DATA_TYPE, original.DATA_TYPE) ||
+                this.isDiff(row.DATA_LENGTH, original.DATA_LENGTH) ||
+                this.isDiff(row.DATA_SCALE, original.DATA_SCALE) ||
+                (row.IS_PK !== original.IS_PK) ||
+                this.isDiff(row.NULLABLE, original.NULLABLE) ||
+                this.isDiff(row.DATA_DEFAULT, original.DATA_DEFAULT) ||
+                this.isDiff(row.COMMENTS, original.COMMENTS);
             row._status = isChanged ? 'modified' : 'original';
         },
 
@@ -888,12 +974,27 @@ export default {
                 const original = this.originalColumns.find(o => o.COLUMN_NAME === c._originalName);
                 if (!original) return;
                 if (this.isDiff(c.COLUMN_NAME, c._originalName)) sqls.push(`ALTER TABLE "${s}"."${t}" RENAME COLUMN "${c._originalName}" TO "${c.COLUMN_NAME}";`);
+
+                // [修改] 构建类型定义字符串
                 let typeLen = c.DATA_TYPE;
-                if (c.DATA_LENGTH && !NO_LENGTH_TYPES.includes(c.DATA_TYPE.toUpperCase())) typeLen += `(${c.DATA_LENGTH})`;
+                if (!NO_LENGTH_TYPES.includes(c.DATA_TYPE.toUpperCase()) && c.DATA_LENGTH) {
+                    if (c.DATA_SCALE && !this.isScaleDisabled(c.DATA_TYPE)) {
+                        typeLen += `(${c.DATA_LENGTH},${c.DATA_SCALE})`;
+                    } else {
+                        typeLen += `(${c.DATA_LENGTH})`;
+                    }
+                }
+
                 let modifySql = `ALTER TABLE "${s}"."${t}" MODIFY "${c.COLUMN_NAME}" ${typeLen}`;
-                if (c.DATA_DEFAULT && this.isDiff(c.DATA_DEFAULT, original.DATA_DEFAULT)) modifySql += ` DEFAULT ${c.DATA_DEFAULT}`;
+                if (this.isDiff(c.DATA_DEFAULT, original.DATA_DEFAULT)) { modifySql += (c.DATA_DEFAULT ? ` DEFAULT ${c.DATA_DEFAULT}` : ` DEFAULT NULL`); }
                 if (this.isDiff(c.NULLABLE, original.NULLABLE)) modifySql += (c.NULLABLE === 'N' ? ' NOT NULL' : ' NULL');
-                const isAttrChanged = this.isDiff(c.DATA_TYPE, original.DATA_TYPE) || this.isDiff(c.DATA_LENGTH, original.DATA_LENGTH) || this.isDiff(c.NULLABLE, original.NULLABLE) || this.isDiff(c.DATA_DEFAULT, original.DATA_DEFAULT);
+
+                // [修改] 增加 DATA_SCALE 的变更检测
+                const isAttrChanged = this.isDiff(c.DATA_TYPE, original.DATA_TYPE) ||
+                    this.isDiff(c.DATA_LENGTH, original.DATA_LENGTH) ||
+                    this.isDiff(c.DATA_SCALE, original.DATA_SCALE) ||
+                    this.isDiff(c.NULLABLE, original.NULLABLE) ||
+                    this.isDiff(c.DATA_DEFAULT, original.DATA_DEFAULT);
                 if (isAttrChanged) sqls.push(modifySql + ';');
                 if (this.isDiff(c.COMMENTS, original.COMMENTS)) sqls.push(`COMMENT ON COLUMN "${s}"."${t}"."${c.COLUMN_NAME}" IS '${c.COMMENTS}';`);
             });
@@ -907,8 +1008,15 @@ export default {
             }
 
             this.designColumns.filter(c => c._status === 'new').forEach(c => {
+                // [修改] 构建新列 SQL
                 let l = `ALTER TABLE "${s}"."${t}" ADD "${c.COLUMN_NAME}" ${c.DATA_TYPE}`;
-                if (c.DATA_LENGTH && !NO_LENGTH_TYPES.includes(c.DATA_TYPE.toUpperCase())) l += `(${c.DATA_LENGTH})`;
+                if (!NO_LENGTH_TYPES.includes(c.DATA_TYPE.toUpperCase()) && c.DATA_LENGTH) {
+                    if (c.DATA_SCALE && !this.isScaleDisabled(c.DATA_TYPE)) {
+                        l += `(${c.DATA_LENGTH},${c.DATA_SCALE})`;
+                    } else {
+                        l += `(${c.DATA_LENGTH})`;
+                    }
+                }
                 if (c.DATA_DEFAULT) l += ` DEFAULT ${c.DATA_DEFAULT}`;
                 if (c.NULLABLE === 'N') l += ' NOT NULL';
                 sqls.push(l + ';');
@@ -972,7 +1080,7 @@ export default {
 </script>
 
 <style scoped>
-/* 样式保持不变 */
+/* 样式保持不变，省略以节省篇幅 */
 .table-detail-wrapper {
     height: 100%;
     display: flex;
@@ -1305,7 +1413,6 @@ export default {
     max-width: 500px;
 }
 
-/* [新增] 表注释样式 */
 .table-comment-display {
     color: #909399;
     font-weight: normal;
