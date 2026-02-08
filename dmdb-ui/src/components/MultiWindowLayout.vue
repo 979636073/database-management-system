@@ -55,6 +55,15 @@
             }">
               {{ data.status === "ENABLED" ? "●" : "○" }}
             </span>
+
+            <span v-if="['PROCEDURE', 'FUNCTION'].includes(data.type)" :style="{
+              color: data.status === 'VALID' ? '#67C23A' : '#F56C6C',
+              fontSize: '12px',
+              marginLeft: '5px',
+              fontWeight: 'bold'
+            }">
+              {{ data.status === 'VALID' ? '●' : '×' }}
+            </span>
           </span>
 
           <span class="node-actions">
@@ -69,7 +78,7 @@
                 @click.stop="openCreateDialog(node, data)"></el-button>
             </template>
 
-            <template v-if="['table', 'view', 'trigger', 'role', 'user'].includes(data.type)">
+            <template v-if="['table', 'view', 'trigger', 'role', 'user', 'PROCEDURE', 'FUNCTION'].includes(data.type)">
               <el-button type="text" icon="el-icon-delete" size="mini" style="color: #f56c6c" title="删除"
                 @click.stop="handleDeleteObject(node, data)"></el-button>
             </template>
@@ -81,7 +90,7 @@
     <el-main class="main-content">
       <div v-if="tabs.length === 0" class="empty-state">
         <i class="el-icon-monitor"></i>
-        <p>请新建连接并选择数据表、视图、用户或角色进行管理</p>
+        <p>请新建连接并选择数据表、视图、存储过程、用户或角色进行管理</p>
       </div>
 
       <el-tabs v-else v-model="activeTab" type="card" closable @tab-remove="removeTab" class="content-tabs"
@@ -97,6 +106,9 @@
 
           <UserDetail v-else-if="item.type === 'user'" :conn-id="item.connId" :username="item.username"
             @user-deleted="handleUserDeleted" @user-status-changed="handleUserStatusChange" />
+
+          <ProcedureDetail v-else-if="item.type === 'PROCEDURE' || item.type === 'FUNCTION'" :conn-id="item.connId"
+            :schema="item.schema" :name="item.tableName" :type="item.type" />
 
         </el-tab-pane>
       </el-tabs>
@@ -191,6 +203,14 @@
           size="small" type="primary" @click="submitCreateTrigger" :loading="submitting">创建</el-button></div>
     </el-dialog>
 
+    <el-dialog title="新建存储过程/函数" :visible.sync="createProcVisible" width="600px" :close-on-click-modal="false">
+      <el-alert title="请直接输入完整的 CREATE OR REPLACE 语句" type="info" :closable="false"
+        style="margin-bottom: 10px"></el-alert>
+      <el-input type="textarea" :rows="15" v-model="procSql" placeholder="CREATE OR REPLACE PROCEDURE ..."></el-input>
+      <div slot="footer"><el-button size="small" @click="createProcVisible = false">取消</el-button><el-button
+          size="small" type="primary" @click="submitCreateProc" :loading="submitting">创建</el-button></div>
+    </el-dialog>
+
     <el-dialog title="新建角色" :visible.sync="createRoleVisible" width="400px" :close-on-click-modal="false">
       <el-form :model="roleForm" size="small" label-width="80px"><el-form-item label="角色名称" required><el-input
             v-model="roleForm.name" placeholder="例如: ROLE_HR"></el-input></el-form-item></el-form>
@@ -226,12 +246,13 @@ import request from "@/utils/request";
 import TableDetail from "./TableDetail.vue";
 import RoleDetail from "./RoleDetail.vue";
 import UserDetail from "./UserDetail.vue";
+import ProcedureDetail from "./ProcedureDetail.vue";
 
 const STORAGE_KEY = "DMDB_CONNECTIONS";
 
 export default {
   name: "MultiWindowLayout",
-  components: { TableDetail, RoleDetail, UserDetail },
+  components: { TableDetail, RoleDetail, UserDetail, ProcedureDetail },
   data() {
     return {
       filterText: "",
@@ -258,6 +279,11 @@ export default {
       viewForm: { name: "", sql: "" },
       createTriggerVisible: false,
       triggerSql: "",
+
+      // [新增] 存储过程弹窗相关变量
+      createProcVisible: false,
+      procSql: "",
+
       createRoleVisible: false,
       roleForm: { name: "" },
 
@@ -288,7 +314,6 @@ export default {
   methods: {
     // --- 右键菜单功能 ---
     openContextMenu(e) {
-      // 检查点击的是否是标签页头
       const tabItem = e.target.closest('.el-tabs__item');
       if (tabItem) {
         const tabKey = tabItem.id.replace('tab-', '');
@@ -328,12 +353,17 @@ export default {
       if (type === "folder_role") return "el-icon-user-solid";
       if (type === "folder_user") return "el-icon-user";
       if (type === "schema") return "el-icon-folder-opened";
-      if (type && type.startsWith("folder_")) return "el-icon-folder";
+      if (type && type.startsWith("folder_")) {
+        if (type === "folder_proc") return "el-icon-cpu";
+        return "el-icon-folder";
+      }
       if (type === "table") return "el-icon-document-copy";
       if (type === "view") return "el-icon-view";
       if (type === "trigger") return "el-icon-s-operation";
       if (type === "role") return "el-icon-s-custom";
       if (type === "user") return "el-icon-user-solid";
+      if (type === "PROCEDURE") return "el-icon-setting";
+      if (type === "FUNCTION") return "el-icon-s-operation";
       return "el-icon-document";
     },
     handleViewModeChange(mode) { this.globalViewMode = mode; },
@@ -406,7 +436,6 @@ export default {
         } catch (e) { resolve([]); }
       } else if (data.type === "folder_schema") {
         try {
-          // 这里保持原代码路径 /db/schemas
           const res = await request.get("/db/schemas", { headers: { "Conn-Id": data.connId } });
           const sorted = (res.data.data || []).sort((a, b) => a.localeCompare(b));
           resolve(sorted.map(s => ({ label: s, type: "schema", connId: data.connId, connName: data.connName, leaf: false })));
@@ -416,24 +445,36 @@ export default {
           { label: "数据表", type: "folder_table", connId: data.connId, connName: data.connName, schema: data.label, leaf: false },
           { label: "视图", type: "folder_view", connId: data.connId, connName: data.connName, schema: data.label, leaf: false },
           { label: "触发器", type: "folder_trigger", connId: data.connId, connName: data.connName, schema: data.label, leaf: false },
+          { label: "存储过程", type: "folder_proc", connId: data.connId, connName: data.connName, schema: data.label, leaf: false },
         ]);
       } else if (data.type === "folder_table") {
         try {
-          // 这里保持原代码路径 /db/tables
           const res = await request.get("/db/tables", { params: { schema: data.schema }, headers: { "Conn-Id": data.connId } });
           resolve(res.data.data.map(t => ({ label: t.TABLE_NAME, comment: t.COMMENTS, type: "table", connId: data.connId, connName: data.connName, schema: data.schema, leaf: true })));
         } catch (e) { resolve([]); }
       } else if (data.type === "folder_view") {
         try {
-          // 这里保持原代码路径 /db/views
           const res = await request.get("/db/views", { params: { schema: data.schema }, headers: { "Conn-Id": data.connId } });
           resolve(res.data.data.map(v => ({ label: v.VIEW_NAME, type: "view", connId: data.connId, connName: data.connName, schema: data.schema, leaf: true })));
         } catch (e) { resolve([]); }
       } else if (data.type === "folder_trigger") {
         try {
-          // 这里保持原代码路径 /db/triggers
           const res = await request.get("/db/triggers", { params: { schema: data.schema }, headers: { "Conn-Id": data.connId } });
           resolve(res.data.data.map(t => ({ label: t.TRIGGER_NAME, status: t.STATUS, type: "trigger", connId: data.connId, connName: data.connName, schema: data.schema, leaf: true })));
+        } catch (e) { resolve([]); }
+      } else if (data.type === "folder_proc") {
+        try {
+          const res = await request.get("/db/proc/list", { params: { schema: data.schema }, headers: { "Conn-Id": data.connId } });
+          const procs = (res.data.data || []).map(p => ({
+            label: p.OBJECT_NAME,
+            type: p.OBJECT_TYPE,
+            status: p.STATUS,
+            connId: data.connId,
+            connName: data.connName,
+            schema: data.schema,
+            leaf: true
+          }));
+          resolve(procs);
         } catch (e) { resolve([]); }
       } else { resolve([]); }
     },
@@ -484,6 +525,8 @@ export default {
         this.openTab(data.connId, data.connName, null, data.label, 'role');
       } else if (data.type === "user") {
         this.openTab(data.connId, data.connName, null, data.label, 'user');
+      } else if (data.type === "PROCEDURE" || data.type === "FUNCTION") {
+        this.openTab(data.connId, data.connName, data.schema, data.label, data.type);
       } else if (data.type === "trigger") {
         this.$message.info(`触发器 [${data.label}] (暂不支持编辑)`);
       }
@@ -503,6 +546,9 @@ export default {
       } else if (tableType === 'role') {
         tabKey = `ROLE-${connId}-${tableName}`;
         title = `角色: ${tableName}`;
+      } else if (tableType === 'PROCEDURE' || tableType === 'FUNCTION') {
+        tabKey = `PROC-${connId}-${schema}-${tableName}`;
+        title = `${tableName} (${tableType === 'PROCEDURE' ? 'Proc' : 'Func'})`;
       } else {
         tabKey = `${connId}-${schema}-${tableName}`;
         title = `${connName} - ${tableName}`;
@@ -547,32 +593,22 @@ export default {
       this.tabs = tabs.filter((tab) => tab.key !== targetName);
     },
 
-    // [新增] 辅助方法：在树中查找特定的用户节点
     findUserNode(connId, username) {
-      // 1. 获取连接节点 (Root Node)
       const connNode = this.$refs.tree.getNode(connId);
       if (!connNode) return null;
-
-      // 2. 查找 "用户" 文件夹节点 (Folder Node)
       const userFolder = connNode.childNodes.find(n => n.data.type === 'folder_user');
-      // 如果文件夹未展开或未加载，则无需更新视图
       if (!userFolder || !userFolder.loaded) return null;
-
-      // 3. 查找具体的用户节点
       const userNode = userFolder.childNodes.find(n => n.data.label === username);
       return userNode;
     },
 
-    // [新增] 处理用户状态变更（锁定/解锁）
     handleUserStatusChange({ username, status, connId }) {
       const node = this.findUserNode(connId, username);
       if (node) {
-        // 直接修改节点数据的属性，Vue 会响应式更新图标颜色
         node.data.status = status;
       }
     },
 
-    // [修改] 处理用户删除
     handleUserDeleted(payload) {
       let username, connId;
       if (typeof payload === 'object') {
@@ -585,7 +621,6 @@ export default {
       const targetTab = this.tabs.find(t => t.type === 'user' && t.username === username);
       if (targetTab) this.removeTab(targetTab.key);
 
-      // 从左侧树中移除节点
       if (connId) {
         const node = this.findUserNode(connId, username);
         if (node) {
@@ -611,11 +646,15 @@ export default {
           if (res.data.data.tablespaces) this.tablespaces = res.data.data.tablespaces;
         });
         this.createUserVisible = true;
+      } else if (data.type === "folder_proc") {
+        // [新增] 存储过程/函数新建逻辑
+        this.procSql = `CREATE OR REPLACE PROCEDURE "${data.schema}"."PROC_NEW" \nAS \nBEGIN\n\nEND;`;
+        this.createProcVisible = true;
       }
     },
 
     handleDeleteObject(node, data) {
-      const typeNameMap = { table: '表', view: '视图', role: '角色', user: '用户' };
+      const typeNameMap = { table: '表', view: '视图', role: '角色', user: '用户', PROCEDURE: '存储过程', FUNCTION: '函数' };
 
       this.$confirm(`确定删除${typeNameMap[data.type] || '对象'}【${data.label}】吗？`, "警告", { type: "warning" })
         .then(async () => {
@@ -628,14 +667,26 @@ export default {
           } else if (data.type === 'role') {
             url = '/db/role/delete';
             params.roleName = data.label;
+          } else if (data.type === 'PROCEDURE' || data.type === 'FUNCTION') {
+            url = '/db/proc/delete';
+            params.schema = data.schema;
+            params.name = data.label;
+            params.type = data.type;
           } else {
             params.sql = `DROP ${data.type.toUpperCase()} "${data.schema}"."${data.label}"`;
           }
 
           const res = await request.delete(url, { headers: { "Conn-Id": data.connId }, params });
+
           if (res.data.code === 200) {
             this.$message.success("删除成功");
-            const tabKey = data.type === 'user' ? `USER-${data.connId}-${data.label}` : (data.type === 'role' ? `ROLE-${data.connId}-${data.label}` : `${data.connId}-${data.schema}-${data.label}`);
+
+            let tabKey = "";
+            if (data.type === 'user') tabKey = `USER-${data.connId}-${data.label}`;
+            else if (data.type === 'role') tabKey = `ROLE-${data.connId}-${data.label}`;
+            else if (data.type === 'PROCEDURE' || data.type === 'FUNCTION') tabKey = `PROC-${data.connId}-${data.schema}-${data.label}`;
+            else tabKey = `${data.connId}-${data.schema}-${data.label}`;
+
             this.removeTab(tabKey);
             if (node.parent) { node.parent.loaded = false; node.parent.expand(); }
           } else {
@@ -678,6 +729,15 @@ export default {
         }
       } catch (e) { this.$message.error("创建失败"); }
     },
+
+    // [新增] 提交新建存储过程
+    async submitCreateProc() {
+      if (!this.procSql) return;
+      if (await this.executeDDL(this.procSql)) {
+        this.createProcVisible = false;
+      }
+    },
+
     async submitCreateTable() {
       if (!this.tableForm.tableName) return this.$message.warning("请输入表名");
       const schema = this.currentNodeData.schema;
@@ -723,6 +783,7 @@ export default {
 </script>
 
 <style scoped>
+/* 样式保持不变 */
 .layout-container {
   height: 100vh;
   background: #f0f2f5;
