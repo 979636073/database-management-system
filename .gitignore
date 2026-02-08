@@ -35,3 +35,4 @@ build/
 ### database-management-system ###
 dist
 node_modules/
+doc/
