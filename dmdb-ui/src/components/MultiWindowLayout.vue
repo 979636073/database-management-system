@@ -27,6 +27,11 @@
 
             {{ node.label }}
 
+            <span v-if="data.type === 'table' && data.comment"
+              style="color: #909399; font-size: 12px; margin-left: 6px;">
+              {{ data.comment }}
+            </span>
+
             <i v-if="data.loading" class="el-icon-loading" style="margin-left: 5px"></i>
 
             <el-tooltip v-if="data.type === 'root' && data.connStatus === 'fail'" class="item" effect="dark"
@@ -61,6 +66,10 @@
 
           <span class="node-actions">
             <template v-if="data.type === 'root'">
+              <el-button type="text" icon="el-icon-monitor" size="mini" title="打开SQL控制台"
+                style="color: #E6A23C; font-weight: bold;" @click.stop="openSqlConsole(data)">
+              </el-button>
+
               <el-button type="text" icon="el-icon-edit" size="mini" @click.stop="openEditDialog(data)"></el-button>
               <el-button type="text" icon="el-icon-delete" size="mini"
                 @click.stop="handleDeleteConn(node, data)"></el-button>
@@ -94,7 +103,7 @@
           <TableDetail v-if="item.type === 'table' || item.type === 'view'" :conn-id="item.connId"
             :conn-name="item.connName" :schema="item.schema" :table-name="item.tableName" :table-type="item.tableType"
             :initial-filter="item.filter" :init-view-mode="item.initViewMode" @view-mode-change="handleViewModeChange"
-            @open-table="handleOpenTable" />
+            @open-table="handleOpenTable" @table-comment-change="(val) => handleTableCommentChange(val, item)" />
 
           <RoleDetail v-else-if="item.type === 'role'" :conn-id="item.connId" :role-name="item.roleName" />
 
@@ -105,6 +114,8 @@
             :schema="item.schema" :name="item.tableName" :type="item.type" />
 
           <TablespaceDetail v-else-if="item.type === 'TABLESPACE'" :conn-id="item.connId" :name="item.tableName" />
+
+          <SqlConsole v-else-if="item.type === 'sql-console'" :conn-id="item.connId" :conn-name="item.connName" />
 
         </el-tab-pane>
       </el-tabs>
@@ -269,12 +280,13 @@ import RoleDetail from "./RoleDetail.vue";
 import UserDetail from "./UserDetail.vue";
 import ProcedureDetail from "./ProcedureDetail.vue";
 import TablespaceDetail from "./TablespaceDetail.vue";
+import SqlConsole from "./SqlConsole.vue";
 
 const STORAGE_KEY = "DMDB_CONNECTIONS";
 
 export default {
   name: "MultiWindowLayout",
-  components: { TableDetail, RoleDetail, UserDetail, ProcedureDetail, TablespaceDetail },
+  components: { TableDetail, RoleDetail, UserDetail, ProcedureDetail, TablespaceDetail, SqlConsole },
   data() {
     return {
       filterText: "",
@@ -319,12 +331,34 @@ export default {
       if (visible) document.body.addEventListener('click', this.closeContextMenu);
       else document.body.removeEventListener('click', this.closeContextMenu);
     }
-    // [修改] 移除了 tsForm.autoExtend 的 watch，使用 @change 事件代替
   },
   created() {
     this.restoreConnections();
   },
   methods: {
+    // [新增] 处理表注释变更，同步更新左侧目录树
+    handleTableCommentChange(newComment, tabItem) {
+      // 使用 tabItem 中的信息构造节点 ID，找到对应节点并更新
+      const nodeId = `TABLE-${tabItem.connId}-${tabItem.schema}-${tabItem.tableName}`;
+      const node = this.$refs.tree.getNode(nodeId);
+      if (node) {
+        // 直接修改 data.comment，Vue 会响应式更新视图
+        this.$set(node.data, 'comment', newComment);
+      }
+    },
+
+    openSqlConsole(connData) {
+      const tabKey = `SQL_CONSOLE_${connData.id}_${Date.now()}`;
+      this.tabs.push({
+        key: tabKey,
+        title: `SQL@${connData.label}`,
+        type: 'sql-console',
+        connId: connData.id,
+        connName: connData.label,
+      });
+      this.activeTab = tabKey;
+    },
+
     openContextMenu(e) { const tabItem = e.target.closest('.el-tabs__item'); if (tabItem) { this.targetTabKey = tabItem.id.replace('tab-', ''); this.menuLeft = e.clientX; this.menuTop = e.clientY + 10; this.contextMenuVisible = true; } },
     closeContextMenu() { this.contextMenuVisible = false; },
     closeCurrentTab() { if (this.targetTabKey) this.removeTab(this.targetTabKey); },
@@ -403,7 +437,20 @@ export default {
           { label: "存储过程", type: "folder_proc", connId: data.connId, connName: data.connName, schema: data.label, leaf: false },
         ]);
       } else if (data.type === "folder_table") {
-        try { const res = await request.get("/db/tables", { params: { schema: data.schema }, headers: { "Conn-Id": data.connId } }); resolve(res.data.data.map(t => ({ label: t.TABLE_NAME, comment: t.COMMENTS, type: "table", connId: data.connId, connName: data.connName, schema: data.schema, leaf: true }))); } catch (e) { resolve([]); }
+        try {
+          const res = await request.get("/db/tables", { params: { schema: data.schema }, headers: { "Conn-Id": data.connId } });
+          // [修改] 给每个表格节点增加唯一ID，以便后续查找更新
+          resolve(res.data.data.map(t => ({
+            id: `TABLE-${data.connId}-${data.schema}-${t.TABLE_NAME}`,
+            label: t.TABLE_NAME,
+            comment: t.COMMENTS,
+            type: "table",
+            connId: data.connId,
+            connName: data.connName,
+            schema: data.schema,
+            leaf: true
+          })));
+        } catch (e) { resolve([]); }
       } else if (data.type === "folder_view") {
         try { const res = await request.get("/db/views", { params: { schema: data.schema }, headers: { "Conn-Id": data.connId } }); resolve(res.data.data.map(v => ({ label: v.VIEW_NAME, type: "view", connId: data.connId, connName: data.connName, schema: data.schema, leaf: true }))); } catch (e) { resolve([]); }
       } else if (data.type === "folder_trigger") {
@@ -595,13 +642,11 @@ export default {
         }).catch(() => { });
     },
 
-    // [新增] 处理新建表空间时的自动扩展开关联动
     handleTsAutoExtendChange(val) {
       if (!val) {
         this.tsForm.nextSize = 0;
         this.tsForm.maxSize = 0;
       } else {
-        // [修改] 开启时保持为 0
         if (this.tsForm.nextSize === 0) this.tsForm.nextSize = 0;
       }
     },
