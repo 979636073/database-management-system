@@ -6,6 +6,8 @@ import java.util.Map;
 
 @Mapper
 public interface SqlMapper {
-    void executeSql(@Param("sql") String sql);
+    // [修改] 返回 int，表示受影响的行数
+    int executeSql(@Param("sql") String sql);
+
     List<Map<String, Object>> runQuery(@Param("sql") String sql);
 }

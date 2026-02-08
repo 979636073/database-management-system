@@ -11,6 +11,12 @@
                                 style="color: #E6A23C; margin-right: 4px;"></i>
                             <i v-else class="el-icon-document-copy" style="color: #409EFF; margin-right: 4px;"></i>
                             <b>{{ activeTable }}</b>
+
+                            <span v-if="tableComment" class="table-comment-display" :title="tableComment">
+                                ({{ tableComment.length > 15 ? tableComment.substring(0, 15) + '...' : tableComment }})
+                            </span>
+                            <el-button type="text" icon="el-icon-edit" size="mini" class="edit-comment-btn"
+                                @click="openEditComment" title="修改表注释"></el-button>
                         </el-breadcrumb-item>
                     </el-breadcrumb>
                 </div>
@@ -26,7 +32,6 @@
                     <el-radio-group v-model="viewMode" size="small" @change="handleViewModeSwitch">
                         <el-radio-button label="data"><i class="el-icon-s-grid"></i> 数据视图</el-radio-button>
                         <el-radio-button label="relation"><i class="el-icon-share"></i> 关联关系</el-radio-button>
-                        <el-radio-button label="sql"><i class="el-icon-cpu"></i> SQL终端</el-radio-button>
                     </el-radio-group>
                 </div>
             </el-header>
@@ -116,7 +121,7 @@
                             <div class="data-stats">
                                 <span v-if="selectedRows.length > 0" style="color: #409EFF; margin-right: 15px;">已选 {{
                                     selectedRows.length
-                                    }} 行</span>
+                                }} 行</span>
                                 <span v-if="hasChanges" style="color: #E6A23C; margin-right: 10px;"><i
                                         class="el-icon-warning"></i>
                                     有未保存的更改</span>
@@ -199,23 +204,23 @@
                         <div ref="relationCanvas" class="g6-canvas-box"></div>
                     </div>
                 </div>
-
-                <div v-else-if="viewMode === 'sql'" key="view-sql" class="full-height view-container">
-                    <div class="sql-box"
-                        style="height: 300px; padding: 0; border: 1px solid #dcdfe6; overflow: hidden; display: flex; flex-direction: column;">
-                        <SqlEditor v-model="customSql" language="sql" style="flex: 1; width: 100%;" />
-                    </div>
-                    <div style="text-align: right; padding: 10px 0;"><el-button type="success" size="small"
-                            @click="runSql" icon="el-icon-video-play">执行 SQL</el-button></div>
-                    <div class="sql-result" v-if="sqlResult.length">
-                        <el-divider content-position="left">结果预览</el-divider>
-                        <el-table :data="sqlResult" border height="100%" size="mini" stripe><el-table-column
-                                v-for="(val, key) in sqlResult[0]" :key="key" :prop="key" :label="key"
-                                show-overflow-tooltip></el-table-column></el-table>
-                    </div>
-                </div>
             </el-main>
         </el-container>
+
+        <el-dialog title="修改表注释" :visible.sync="editCommentVisible" width="500px" append-to-body>
+            <el-form label-width="80px" size="small">
+                <el-form-item label="表名">
+                    <el-input :value="activeTable" disabled></el-input>
+                </el-form-item>
+                <el-form-item label="注释">
+                    <el-input type="textarea" :rows="4" v-model="newComment" placeholder="请输入表注释"></el-input>
+                </el-form-item>
+            </el-form>
+            <div slot="footer">
+                <el-button @click="editCommentVisible = false" size="small">取消</el-button>
+                <el-button type="primary" @click="submitComment" :loading="altering" size="small">保存</el-button>
+            </div>
+        </el-dialog>
 
         <el-dialog title="编辑视图定义" :visible.sync="editViewVisible" width="900px" append-to-body
             :close-on-click-modal="false">
@@ -253,7 +258,7 @@
                         <div><span style="color:#909399;font-size:12px;">表：</span><el-tag size="mini" type="info"
                                 style="font-weight:bold;">{{ scope.row.TABLE_NAME }}</el-tag></div>
                         <div style="margin-top:4px;"><span style="color:#909399;font-size:12px;">列：</span><b>{{
-                                scope.row.COLUMN_NAME }}</b></div>
+                            scope.row.COLUMN_NAME }}</b></div>
                     </template>
                 </el-table-column>
                 <el-table-column label="冲突详情" min-width="280">
@@ -398,6 +403,7 @@
 </template>
 
 <script>
+// ... G6 Node Definition and Constants remain unchanged ...
 import request from '@/utils/request';
 import G6 from '@antv/g6';
 import SqlEditor from './SqlEditor.vue';
@@ -451,7 +457,6 @@ export default {
             editingCell: null, originalDataMap: {}, modifiedRows: new Set(), newRows: [],
             tableColumns: [], conditions: [], logicalOperator: 'AND',
             conflictVisible: false, conflictList: [], conflictPkValue: null, conflictType: 'delete',
-            customSql: '', sqlResult: [],
             ddlVisible: false, currentDDL: '',
 
             editViewVisible: false, viewSql: '',
@@ -459,6 +464,11 @@ export default {
 
             jumpFromConflict: false,
             selectedRows: [],
+
+            // 表注释相关
+            tableComment: '',
+            editCommentVisible: false,
+            newComment: '',
 
             designVisible: false, designActiveTab: 'columns',
             designColumns: [], originalColumns: [], deleteColumnList: [],
@@ -471,7 +481,7 @@ export default {
             sqlConfirmVisible: false, generatedSql: '', altering: false
         };
     },
-
+    // ... Computed ...
     computed: {
         rawKeys() { return this.currentDataList.length ? Object.keys(this.currentDataList[0]).filter(k => k !== 'DB_INTERNAL_ID') : []; },
         hasChanges() { return this.modifiedRows.size > 0 || this.newRows.length > 0; },
@@ -574,8 +584,53 @@ export default {
             else { this.destroyGraph(); if (mode === 'data') this.loadData(); }
         },
 
+        // 加载表注释
+        async loadTableComment() {
+            try {
+                const sql = `SELECT COMMENTS FROM ALL_TAB_COMMENTS WHERE OWNER='${this.currentSchema}' AND TABLE_NAME='${this.activeTable}' AND TABLE_TYPE IN ('TABLE', 'VIEW')`;
+                const res = await this.request('post', '/execute', { sql: sql });
+                if (res.data.code === 200 && res.data.data && res.data.data.length > 0) {
+                    this.tableComment = res.data.data[0].COMMENTS || '';
+                } else {
+                    this.tableComment = '';
+                }
+            } catch (e) {
+                console.error("加载表注释失败", e);
+            }
+        },
+
+        openEditComment() {
+            this.newComment = this.tableComment;
+            this.editCommentVisible = true;
+        },
+
+        // [修改] 提交注释并通知父组件同步
+        async submitComment() {
+            this.altering = true;
+            try {
+                const safeComment = this.newComment.replace(/'/g, "''");
+                const sql = `COMMENT ON TABLE "${this.currentSchema}"."${this.activeTable}" IS '${safeComment}'`;
+                const res = await this.request('post', '/execute', { sql: sql });
+                if (res.data.code === 200) {
+                    this.$message.success('注释更新成功');
+                    this.tableComment = this.newComment;
+                    this.editCommentVisible = false;
+                    // 【关键修改】通知父组件更新左侧目录树
+                    this.$emit('table-comment-change', this.newComment);
+                } else {
+                    throw new Error(res.data.msg);
+                }
+            } catch (e) {
+                this.handleError(e, '更新注释失败');
+            } finally {
+                this.altering = false;
+            }
+        },
+
         async loadData() {
             this.resetEditState(); this.selectedRows = []; this.loading = true;
+            this.loadTableComment(); // 加载注释
+
             try {
                 const colRes = await this.request('get', '/columns', { schema: this.currentSchema, tableName: this.activeTable });
                 this.tableColumns = colRes.data.data || [];
@@ -616,6 +671,7 @@ export default {
             } catch (e) { this.handleError(e, '数据加载失败'); } finally { this.loading = false; }
         },
 
+        // ... Other existing methods (handleEditView, submitViewAlter, etc.) ...
         async handleEditView() {
             try {
                 const res = await this.request('get', '/ddl', { schema: this.currentSchema, tableName: this.activeTable });
@@ -801,7 +857,6 @@ export default {
         handleRefTableChange(row) { row.R_COLUMN_NAME = ''; if (row.R_TABLE_NAME) this.loadRefColumns(row.R_TABLE_NAME); },
         isDiff(newVal, oldVal) { const n = (newVal === null || newVal === undefined) ? "" : String(newVal).trim(); const o = (oldVal === null || oldVal === undefined) ? "" : String(oldVal).trim(); return n !== o; },
 
-        // 确保以下方法存在且未拼写错误
         addDesignColumn() { this.designColumns.push({ COLUMN_NAME: 'NEW_COL', DATA_TYPE: 'VARCHAR2', DATA_LENGTH: '50', NULLABLE: 'Y', IS_PK: false, _status: 'new' }); },
         removeDesignColumn(index, row) { if (row._status !== 'new') this.deleteColumnList.push(row.COLUMN_NAME); this.designColumns.splice(index, 1); },
 
@@ -896,7 +951,6 @@ export default {
         handleSizeChange(v) { this.pageSize = v; this.currentPage = 1; this.loadData(); },
         handleCurrentChange(v) { this.currentPage = v; this.loadData(); },
 
-        async runSql() { const res = await this.request('post', '/execute', { sql: this.customSql }); if (res.data.code === 200) this.sqlResult = res.data.data; },
         destroyGraph() { if (this.graphInstance) { this.graphInstance.destroy(); this.graphInstance = null; } const c = this.$refs.relationCanvas; if (c) c.innerHTML = ''; },
 
         handleShowAllChange(val) { if (val) { if (this.graphNodeIds.length > 0) this.expandedTableList = [...this.graphNodeIds]; } else { this.expandedTableList = []; } this.loadRelations(); },
@@ -918,6 +972,7 @@ export default {
 </script>
 
 <style scoped>
+/* 样式保持不变 */
 .table-detail-wrapper {
     height: 100%;
     display: flex;
@@ -1248,5 +1303,31 @@ export default {
 
 .error-dialog-width {
     max-width: 500px;
+}
+
+/* [新增] 表注释样式 */
+.table-comment-display {
+    color: #909399;
+    font-weight: normal;
+    font-size: 12px;
+    margin-left: 8px;
+    cursor: default;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.edit-comment-btn {
+    margin-left: 4px;
+    padding: 2px;
+    color: #409EFF;
+}
+
+.edit-comment-btn:hover {
+    background-color: #ecf5ff;
+    border-radius: 4px;
 }
 </style>
