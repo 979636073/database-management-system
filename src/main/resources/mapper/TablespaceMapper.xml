@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.dmdb.mapper.TablespaceMapper">
+
+    <select id="listTablespaces" resultType="java.util.Map">
+        SELECT
+            t.TABLESPACE_NAME,
+            t.STATUS,
+            t.CONTENTS,
+            (SELECT ROUND(SUM(BYTES)/1024/1024, 2) FROM DBA_DATA_FILES WHERE TABLESPACE_NAME = t.TABLESPACE_NAME) AS TOTAL_MB
+        FROM DBA_TABLESPACES t
+        ORDER BY t.TABLESPACE_NAME
+    </select>
+
+    <select id="listDatafiles" resultType="java.util.Map">
+        SELECT
+            FILE_ID,
+            FILE_NAME,
+            TABLESPACE_NAME,
+            ROUND(BYTES/1024/1024, 2) AS SIZE_MB,
+            AUTOEXTENSIBLE,
+            ROUND(MAXBYTES/1024/1024, 2) AS MAX_SIZE_MB,
+
+            -- [核心修正] 达梦 INCREMENT_BY 直接存储的是 MB 值，无需转换
+            INCREMENT_BY AS NEXT_SIZE_MB,
+
+            STATUS
+        FROM DBA_DATA_FILES
+        WHERE TABLESPACE_NAME = #{tablespaceName}
+        ORDER BY FILE_ID
+    </select>
+
+    <select id="getPageSize" resultType="java.lang.Long">
+        SELECT PAGE() FROM DUAL
+    </select>
+
+</mapper>
