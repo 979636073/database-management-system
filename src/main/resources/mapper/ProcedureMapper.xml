@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.dmdb.mapper.ProcedureMapper">
+
+    <select id="listProcedures" resultType="java.util.Map">
+        SELECT OBJECT_NAME, OBJECT_TYPE, STATUS
+        FROM ALL_OBJECTS
+        WHERE OWNER = #{schema}
+        AND OBJECT_TYPE IN ('PROCEDURE', 'FUNCTION')
+        ORDER BY OBJECT_TYPE, OBJECT_NAME
+    </select>
+
+    <select id="getProcedureSource" resultType="java.lang.String">
+        SELECT TEXT
+        FROM ALL_SOURCE
+        WHERE OWNER = #{schema}
+        AND NAME = #{name}
+        AND TYPE = #{type}
+        ORDER BY LINE
+    </select>
+
+</mapper>
