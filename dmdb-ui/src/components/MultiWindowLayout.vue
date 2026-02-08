@@ -180,7 +180,7 @@
       </div>
     </el-dialog>
 
-    <el-dialog title="新建数据表" :visible.sync="createTableVisible" width="700px" :close-on-click-modal="false">
+    <el-dialog title="新建数据表" :visible.sync="createTableVisible" width="950px" :close-on-click-modal="false">
       <el-form :model="tableForm" size="small" label-width="80px">
         <el-form-item label="表名" required>
           <el-input v-model="tableForm.tableName" placeholder="例如: ORDER_ITEMS" style="width: 100%"></el-input>
@@ -190,27 +190,60 @@
           <el-button type="text" icon="el-icon-plus" style="float: right" @click="addTableColumn">添加列</el-button>
         </div>
         <el-table :data="tableForm.columns" border size="mini" max-height="300">
-          <el-table-column label="列名" width="150"><template slot-scope="scope"><el-input v-model="scope.row.name"
-                placeholder="列名"></el-input></template></el-table-column>
-          <el-table-column label="类型" width="120">
+          <el-table-column label="列名" width="150">
             <template slot-scope="scope">
-              <el-select v-model="scope.row.type" placeholder="类型">
-                <el-option value="VARCHAR"></el-option><el-option value="INTEGER"></el-option><el-option
-                  value="DATE"></el-option>
-                <el-option value="TIMESTAMP"></el-option><el-option value="DECIMAL"></el-option><el-option
-                  value="TEXT"></el-option>
+              <el-input v-model="scope.row.name" placeholder="列名"></el-input>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="类型" width="130">
+            <template slot-scope="scope">
+              <el-select v-model="scope.row.type" placeholder="类型" filterable allow-create
+                @change="handleNewTableTypeChange(scope.row)">
+                <el-option v-for="type in dmDataTypes" :key="type" :label="type" :value="type"></el-option>
               </el-select>
             </template>
           </el-table-column>
-          <el-table-column label="长度" width="80"><template slot-scope="scope"><el-input v-model="scope.row.length"
-                :disabled="['INTEGER', 'DATE', 'TIMESTAMP', 'TEXT'].includes(scope.row.type)"></el-input></template></el-table-column>
-          <el-table-column label="主键" width="60" align="center"><template slot-scope="scope"><el-checkbox
-                v-model="scope.row.pk"></el-checkbox></template></el-table-column>
-          <el-table-column label="非空" width="60" align="center"><template slot-scope="scope"><el-checkbox
-                v-model="scope.row.notNull"></el-checkbox></template></el-table-column>
-          <el-table-column label="操作" width="60" align="center"><template slot-scope="scope"><el-button type="text"
-                icon="el-icon-delete" style="color: #f56c6c"
-                @click="removeTableColumn(scope.$index)"></el-button></template></el-table-column>
+
+          <el-table-column label="长度/精度" width="100">
+            <template slot-scope="scope">
+              <el-input v-model="scope.row.length" :disabled="isLengthDisabled(scope.row.type)"
+                :placeholder="getLengthPlaceholder(scope.row.type)">
+              </el-input>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="标度" width="80">
+            <template slot-scope="scope">
+              <el-input v-model="scope.row.scale" :disabled="isScaleDisabled(scope.row.type)" placeholder="0">
+              </el-input>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="默认值" width="120">
+            <template slot-scope="scope">
+              <el-input v-model="scope.row.defaultValue" placeholder="无"></el-input>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="主键" width="60" align="center">
+            <template slot-scope="scope">
+              <el-checkbox v-model="scope.row.pk"></el-checkbox>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="非空" width="60" align="center">
+            <template slot-scope="scope">
+              <el-checkbox v-model="scope.row.notNull"></el-checkbox>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="操作" width="60" align="center">
+            <template slot-scope="scope">
+              <el-button type="text" icon="el-icon-delete" style="color: #f56c6c"
+                @click="removeTableColumn(scope.$index)"></el-button>
+            </template>
+          </el-table-column>
         </el-table>
       </el-form>
       <div slot="footer">
@@ -284,6 +317,23 @@ import SqlConsole from "./SqlConsole.vue";
 
 const STORAGE_KEY = "DMDB_CONNECTIONS";
 
+// 达梦数据库常用数据类型
+const DM_DATA_TYPES = [
+  'CHAR', 'VARCHAR', 'VARCHAR2', 'TEXT', 'LONG', 'CLOB', 'BLOB',
+  'NUMBER', 'NUMERIC', 'DECIMAL', 'INTEGER', 'INT', 'BIGINT', 'TINYINT', 'BYTE', 'SMALLINT',
+  'FLOAT', 'DOUBLE', 'DOUBLE PRECISION', 'REAL',
+  'BIT', 'BINARY', 'VARBINARY',
+  'DATE', 'TIME', 'TIMESTAMP', 'TIMESTAMP WITH TIME ZONE', 'TIMESTAMP WITH LOCAL TIME ZONE',
+  'INTERVAL YEAR TO MONTH', 'INTERVAL DAY TO SECOND',
+  'BOOLEAN'
+];
+
+// 不需要长度/精度的类型
+const NO_LENGTH_TYPES = ['INT', 'INTEGER', 'BIGINT', 'TINYINT', 'SMALLINT', 'BYTE', 'DATE', 'TIME', 'TIMESTAMP', 'CLOB', 'BLOB', 'TEXT', 'LONG', 'BOOLEAN'];
+
+// [新增] 支持标度的类型
+const SCALE_TYPES = ['NUMBER', 'DECIMAL', 'NUMERIC', 'FLOAT', 'DOUBLE', 'REAL'];
+
 export default {
   name: "MultiWindowLayout",
   components: { TableDetail, RoleDetail, UserDetail, ProcedureDetail, TablespaceDetail, SqlConsole },
@@ -307,7 +357,10 @@ export default {
       currentNodeData: null,
       currentNodeRef: null,
 
-      createTableVisible: false, tableForm: { tableName: "", columns: [{ name: "ID", type: "INTEGER", length: "", pk: true, notNull: true }] },
+      createTableVisible: false,
+      // [修改] 初始化增加 scale 字段
+      tableForm: { tableName: "", columns: [{ name: "ID", type: "INTEGER", length: "", scale: "", defaultValue: "", pk: true, notNull: true }] },
+
       createViewVisible: false, viewForm: { name: "", sql: "" },
       createTriggerVisible: false, triggerSql: "",
       createProcVisible: false, procSql: "",
@@ -323,6 +376,7 @@ export default {
       menuLeft: 0,
       menuTop: 0,
       targetTabKey: null,
+      dmDataTypes: DM_DATA_TYPES,
     };
   },
   watch: {
@@ -336,13 +390,10 @@ export default {
     this.restoreConnections();
   },
   methods: {
-    // [新增] 处理表注释变更，同步更新左侧目录树
     handleTableCommentChange(newComment, tabItem) {
-      // 使用 tabItem 中的信息构造节点 ID，找到对应节点并更新
       const nodeId = `TABLE-${tabItem.connId}-${tabItem.schema}-${tabItem.tableName}`;
       const node = this.$refs.tree.getNode(nodeId);
       if (node) {
-        // 直接修改 data.comment，Vue 会响应式更新视图
         this.$set(node.data, 'comment', newComment);
       }
     },
@@ -439,7 +490,6 @@ export default {
       } else if (data.type === "folder_table") {
         try {
           const res = await request.get("/db/tables", { params: { schema: data.schema }, headers: { "Conn-Id": data.connId } });
-          // [修改] 给每个表格节点增加唯一ID，以便后续查找更新
           resolve(res.data.data.map(t => ({
             id: `TABLE-${data.connId}-${data.schema}-${t.TABLE_NAME}`,
             label: t.TABLE_NAME,
@@ -580,6 +630,11 @@ export default {
       this.currentNodeData = data;
       this.currentNodeRef = node;
       if (data.type === "folder_table") {
+        // 显式重置表单数据，清除之前的记录
+        this.tableForm = {
+          tableName: "",
+          columns: [{ name: "ID", type: "INTEGER", length: "", scale: "", defaultValue: "", pk: true, notNull: true }]
+        };
         this.createTableVisible = true;
       } else if (data.type === "folder_view") {
         this.createViewVisible = true;
@@ -602,27 +657,29 @@ export default {
       }
     },
 
+    // 删除表逻辑分流：表/视图走通用SQL执行接口(POST)，其他走专用DELETE接口
     handleDeleteObject(node, data) {
       const typeNameMap = { table: '表', view: '视图', role: '角色', user: '用户', PROCEDURE: '存储过程', FUNCTION: '函数', TABLESPACE: '表空间' };
 
       this.$confirm(`确定删除${typeNameMap[data.type] || '对象'}【${data.label}】吗？`, "警告", { type: "warning" })
         .then(async () => {
-          let url = '/db/execute';
-          const params = {};
+          let res;
 
-          if (data.type === 'user') {
-            url = '/db/users/delete'; params.username = data.label;
-          } else if (data.type === 'role') {
-            url = '/db/role/delete'; params.roleName = data.label;
-          } else if (data.type === 'PROCEDURE' || data.type === 'FUNCTION') {
-            url = '/db/proc/delete'; params.schema = data.schema; params.name = data.label; params.type = data.type;
-          } else if (data.type === 'TABLESPACE') {
-            url = '/db/tablespace/delete'; params.name = data.label;
+          if (['user', 'role', 'PROCEDURE', 'FUNCTION', 'TABLESPACE'].includes(data.type)) {
+            // 特殊对象走专用 DELETE 接口
+            let url = '';
+            const params = {};
+            if (data.type === 'user') { url = '/db/users/delete'; params.username = data.label; }
+            else if (data.type === 'role') { url = '/db/role/delete'; params.roleName = data.label; }
+            else if (data.type === 'PROCEDURE' || data.type === 'FUNCTION') { url = '/db/proc/delete'; params.schema = data.schema; params.name = data.label; params.type = data.type; }
+            else if (data.type === 'TABLESPACE') { url = '/db/tablespace/delete'; params.name = data.label; }
+
+            res = await request.delete(url, { headers: { "Conn-Id": data.connId }, params });
           } else {
-            params.sql = `DROP ${data.type.toUpperCase()} "${data.schema}"."${data.label}"`;
+            // 通用对象 (表、视图、触发器) 走通用 SQL 执行接口 (POST)
+            const sql = `DROP ${data.type.toUpperCase()} "${data.schema}"."${data.label}"`;
+            res = await request.post('/db/execute', { sql: sql }, { headers: { "Conn-Id": data.connId } });
           }
-
-          const res = await request.delete(url, { headers: { "Conn-Id": data.connId }, params });
 
           if (res.data.code === 200) {
             this.$message.success("删除成功");
@@ -670,17 +727,104 @@ export default {
     async submitCreateUser() { if (!this.userForm.username || !this.userForm.password) return this.$message.warning("请填写完整"); this.submitting = true; try { const res = await request.post("/db/users/create", this.userForm, { headers: { "Conn-Id": this.currentNodeData.connId } }); if (res.data.code === 200) { this.$message.success("用户创建成功"); this.createUserVisible = false; this.currentNodeRef.loaded = false; this.currentNodeRef.expand(); } else { this.$alert(res.data.msg, '创建失败', { type: 'error' }); } } finally { this.submitting = false; } },
     async submitCreateRole() { if (!this.roleForm.name) return this.$message.warning("请输入角色名称"); try { const res = await request.post("/db/role/create", { roleName: this.roleForm.name }, { headers: { "Conn-Id": this.currentNodeData.connId } }); if (res.data.code === 200) { this.$message.success("创建成功"); this.createRoleVisible = false; this.currentNodeRef.loaded = false; this.currentNodeRef.expand(); } else { this.$message.error(res.data.msg); } } catch (e) { this.$message.error("创建失败"); } },
     async submitCreateProc() { if (!this.procSql) return; if (await this.executeDDL(this.procSql)) { this.createProcVisible = false; } },
-    async submitCreateTable() { if (!this.tableForm.tableName) return this.$message.warning("请输入表名"); const schema = this.currentNodeData.schema; const fullTableName = `"${schema}"."${this.tableForm.tableName}"`; let colsSql = this.tableForm.columns.map((col) => { let line = `"${col.name}" ${col.type}`; if (col.length && !["INTEGER", "DATE", "TIMESTAMP", "TEXT"].includes(col.type)) line += `(${col.length})`; if (col.notNull) line += " NOT NULL"; return line; }).join(",\n  "); const pkCols = this.tableForm.columns.filter(c => c.pk).map(c => `"${c.name}"`); let pkSql = ""; if (pkCols.length > 0) pkSql = `,\n  CONSTRAINT "PK_${this.tableForm.tableName}" PRIMARY KEY (${pkCols.join(', ')})`; const sql = `CREATE TABLE ${fullTableName} (\n  ${colsSql}${pkSql}\n);`; if (await this.executeDDL(sql)) this.createTableVisible = false; },
+
+    // 【核心修改】提交建表逻辑，拼接长度和标度
+    async submitCreateTable() {
+      if (!this.tableForm.tableName) return this.$message.warning("请输入表名");
+      const schema = this.currentNodeData.schema;
+      const fullTableName = `"${schema}"."${this.tableForm.tableName}"`;
+
+      let colsSql = this.tableForm.columns.map((col) => {
+        let line = `"${col.name}" ${col.type}`;
+
+        // 拼接长度/标度
+        if (col.length && !this.isLengthDisabled(col.type)) {
+          if (col.scale && !this.isScaleDisabled(col.type)) {
+            line += `(${col.length},${col.scale})`; // 如 DECIMAL(10,2)
+          } else {
+            line += `(${col.length})`;
+          }
+        }
+
+        // 拼接默认值 (在 NOT NULL 之前)
+        if (col.defaultValue) {
+          line += ` DEFAULT ${col.defaultValue}`;
+        }
+
+        // 拼接非空约束
+        if (col.notNull) {
+          line += " NOT NULL";
+        }
+        return line;
+      }).join(",\n  ");
+
+      const pkCols = this.tableForm.columns.filter(c => c.pk).map(c => `"${c.name}"`);
+      let pkSql = "";
+      if (pkCols.length > 0) {
+        pkSql = `,\n  CONSTRAINT "PK_${this.tableForm.tableName}" PRIMARY KEY (${pkCols.join(', ')})`;
+      }
+
+      const sql = `CREATE TABLE ${fullTableName} (\n  ${colsSql}${pkSql}\n);`;
+
+      if (await this.executeDDL(sql)) {
+        this.createTableVisible = false;
+      }
+    },
     async submitCreateView() { if (!this.viewForm.name || !this.viewForm.sql) return this.$message.warning("请填写完整"); const schema = this.currentNodeData.schema; const sql = `CREATE OR REPLACE VIEW "${schema}"."${this.viewForm.name}" AS\n${this.viewForm.sql}`; if (await this.executeDDL(sql)) this.createViewVisible = false; },
     async submitCreateTrigger() { if (!this.triggerSql) return; if (await this.executeDDL(this.triggerSql)) this.createTriggerVisible = false; },
-    addTableColumn() { this.tableForm.columns.push({ name: "", type: "VARCHAR", length: "50", pk: false, notNull: false }); },
+
+    addTableColumn() {
+      this.tableForm.columns.push({ name: "", type: "VARCHAR", length: "50", scale: "", defaultValue: "", pk: false, notNull: false });
+    },
     removeTableColumn(index) { this.tableForm.columns.splice(index, 1); },
-    async executeDDL(sql) { this.submitting = true; try { const res = await request.post("/db/execute", { sql: sql }, { headers: { "Conn-Id": this.currentNodeData.connId } }); if (res.data.code === 200) { this.$message.success("创建成功"); this.currentNodeRef.loaded = false; this.currentNodeRef.expand(); return true; } else { this.$message.error(res.data.msg); return false; } } catch (e) { this.$message.error("请求失败"); return false; } finally { this.submitting = false; } }
+    async executeDDL(sql) { this.submitting = true; try { const res = await request.post("/db/execute", { sql: sql }, { headers: { "Conn-Id": this.currentNodeData.connId } }); if (res.data.code === 200) { this.$message.success("创建成功"); this.currentNodeRef.loaded = false; this.currentNodeRef.expand(); return true; } else { this.$message.error(res.data.msg); return false; } } catch (e) { this.$message.error("请求失败"); return false; } finally { this.submitting = false; } },
+
+    // 判断长度/精度是否禁用
+    isLengthDisabled(type) {
+      if (!type) return false;
+      return NO_LENGTH_TYPES.includes(type.toUpperCase());
+    },
+
+    // 【新增】判断标度是否禁用
+    isScaleDisabled(type) {
+      if (!type) return true;
+      return !SCALE_TYPES.includes(type.toUpperCase());
+    },
+
+    // 获取长度输入框的占位符
+    getLengthPlaceholder(type) {
+      if (!type) return '';
+      const t = type.toUpperCase();
+      if (NO_LENGTH_TYPES.includes(t)) return '无';
+      // 修正提示文案，因为标度已经独立了
+      return '长度';
+    },
+
+    // 处理新建表时的类型变更，自动填充默认长度
+    handleNewTableTypeChange(row) {
+      // 重置标度
+      row.scale = "";
+
+      if (this.isLengthDisabled(row.type)) {
+        row.length = "";
+      } else {
+        const t = row.type.toUpperCase();
+        if (['VARCHAR', 'VARCHAR2', 'CHAR'].includes(t)) {
+          row.length = '50';
+        } else if (['DECIMAL', 'NUMERIC', 'NUMBER', 'FLOAT', 'DOUBLE', 'REAL'].includes(t)) {
+          row.length = '10';
+          row.scale = '2'; // 给默认标度
+        } else if (t === 'BIT') {
+          row.length = '1';
+        }
+      }
+    }
   },
 };
 </script>
 
 <style scoped>
+/* 样式部分保持不变，省略以节省篇幅 */
 .layout-container {
   height: 100vh;
   background: #f0f2f5;
