@@ -153,7 +153,57 @@
                                             </div>
                                         </template>
                                         <template slot-scope="scope">
-                                            <div v-if="!isReadOnly && isCellEditing(scope.row, col.COLUMN_NAME)"
+                                            <div v-if="isBinaryLob(col.DATA_TYPE)">
+                                                <div v-if="!isReadOnly && !scope.row.DB_INTERNAL_ID">
+                                                    <input type="file"
+                                                        :id="'file-' + scope.$index + '-' + col.COLUMN_NAME"
+                                                        style="display:none"
+                                                        @change="(e) => handleInlineFileUpload(e, scope.row, col.COLUMN_NAME)" />
+
+                                                    <el-button size="mini" type="primary" plain
+                                                        icon="el-icon-folder-add"
+                                                        @click="triggerFileSelect(scope.$index, col.COLUMN_NAME)">
+                                                        {{ scope.row[col.COLUMN_NAME] ? '已选文件 (待保存)' : '选择文件' }}
+                                                    </el-button>
+                                                    <el-button v-if="scope.row[col.COLUMN_NAME]" type="text"
+                                                        icon="el-icon-close" style="color:#F56C6C; margin-left:5px"
+                                                        @click="clearInlineFile(scope.row, col.COLUMN_NAME)"
+                                                        title="清除"></el-button>
+                                                </div>
+                                                <div v-else-if="scope.row.DB_INTERNAL_ID">
+                                                    <el-tag size="mini" type="info" style="margin-right: 5px;">{{
+                                                        col.DATA_TYPE }}</el-tag>
+                                                    <el-button type="text" size="mini" icon="el-icon-view" title="查看/预览"
+                                                        @click="handlePreviewLob(scope.row, col)"></el-button>
+                                                    <el-button type="text" size="mini" icon="el-icon-download"
+                                                        title="下载"
+                                                        @click="handleDownloadLob(scope.row, col)"></el-button>
+                                                    <el-button type="text" size="mini" icon="el-icon-upload2"
+                                                        title="上传覆盖" @click="handleUploadLob(scope.row, col)"
+                                                        v-if="!isReadOnly"></el-button>
+                                                </div>
+                                                <span v-else class="placeholder-text">NULL</span>
+                                            </div>
+
+                                            <div v-else-if="isTextLob(col.DATA_TYPE)">
+                                                <div v-if="!isReadOnly && (isCellEditing(scope.row, col.COLUMN_NAME) || !scope.row.DB_INTERNAL_ID)"
+                                                    class="inline-input-box">
+                                                    <el-input type="textarea" :rows="1" autosize
+                                                        v-model="scope.row[col.COLUMN_NAME]"
+                                                        @blur="finishEditing(scope.row, col.COLUMN_NAME)"
+                                                        placeholder="请输入...">
+                                                    </el-input>
+                                                </div>
+                                                <div v-else-if="scope.row.DB_INTERNAL_ID">
+                                                    <el-tag size="mini" type="info"
+                                                        style="margin-right: 5px;">CLOB</el-tag>
+                                                    <el-button type="text" size="mini" icon="el-icon-document"
+                                                        @click="handlePreviewLob(scope.row, col)">查看内容</el-button>
+                                                </div>
+                                                <span v-else class="placeholder-text">NULL</span>
+                                            </div>
+
+                                            <div v-else-if="!isReadOnly && isCellEditing(scope.row, col.COLUMN_NAME)"
                                                 class="inline-input-box">
                                                 <el-input v-model="scope.row[col.COLUMN_NAME]" size="mini"
                                                     @blur="finishEditing(scope.row, col.COLUMN_NAME)"
@@ -221,6 +271,28 @@
                 <el-button type="primary" @click="submitComment" :loading="altering" size="small">保存</el-button>
             </div>
         </el-dialog>
+
+        <el-dialog :title="previewTitle" :visible.sync="previewVisible" width="800px" append-to-body
+            custom-class="preview-dialog">
+            <div v-loading="previewLoading"
+                style="min-height: 200px; display: flex; justify-content: center; align-items: center; overflow: auto; max-height: 600px;">
+                <img v-if="previewType === 'image'" :src="previewUrl"
+                    style="max-width: 100%; max-height: 100%; box-shadow: 0 0 10px rgba(0,0,0,0.1);" />
+                <pre v-else-if="previewType === 'text'"
+                    style="width:100%; white-space: pre-wrap; font-family: Consolas; background: #f5f7fa; padding: 10px;">{{
+            previewContent }}</pre>
+                <div v-else style="color: #999; text-align: center;">
+                    <i class="el-icon-document" style="font-size: 48px;"></i>
+                    <p>二进制文件，不支持直接预览，请下载。</p>
+                </div>
+            </div>
+            <div slot="footer">
+                <el-button @click="previewVisible = false">关闭</el-button>
+                <el-button type="primary" icon="el-icon-download" @click="downloadCurrentLob">下载文件</el-button>
+            </div>
+        </el-dialog>
+
+        <input type="file" ref="lobFileInput" style="display: none" @change="handleFileChange" />
 
         <el-dialog title="编辑视图定义" :visible.sync="editViewVisible" width="900px" append-to-body
             :close-on-click-modal="false">
@@ -422,7 +494,7 @@ import request from '@/utils/request';
 import G6 from '@antv/g6';
 import SqlEditor from './SqlEditor.vue';
 
-// G6 RegisterNode (保持不变)
+// G6 RegisterNode
 G6.registerNode('db-table', {
     draw: (cfg, group) => {
         const { label, tableComment, columns = [], isCenter, isTruncated, totalColCount } = cfg;
@@ -446,8 +518,9 @@ G6.registerNode('db-table', {
     }
 });
 
+// 类型常量
 const DM_DATA_TYPES = [
-    'CHAR', 'VARCHAR', 'VARCHAR2', 'TEXT', 'LONG', 'CLOB', 'BLOB',
+    'CHAR', 'VARCHAR', 'VARCHAR2', 'TEXT', 'LONG', 'CLOB', 'BLOB', 'IMAGE',
     'NUMBER', 'NUMERIC', 'DECIMAL', 'INTEGER', 'INT', 'BIGINT', 'TINYINT', 'BYTE', 'SMALLINT',
     'FLOAT', 'DOUBLE', 'DOUBLE PRECISION', 'REAL',
     'BIT', 'BINARY', 'VARBINARY',
@@ -456,8 +529,10 @@ const DM_DATA_TYPES = [
     'BOOLEAN'
 ];
 
-const NO_LENGTH_TYPES = ['INT', 'INTEGER', 'BIGINT', 'TINYINT', 'SMALLINT', 'BYTE', 'DATE', 'TIME', 'TIMESTAMP', 'CLOB', 'BLOB', 'TEXT', 'LONG', 'BOOLEAN'];
+const NO_LENGTH_TYPES = ['INT', 'INTEGER', 'BIGINT', 'TINYINT', 'SMALLINT', 'BYTE', 'DATE', 'TIME', 'TIMESTAMP', 'CLOB', 'BLOB', 'TEXT', 'LONG', 'BOOLEAN', 'IMAGE'];
 const SCALE_TYPES = ['NUMBER', 'DECIMAL', 'NUMERIC', 'FLOAT', 'DOUBLE', 'REAL'];
+const BINARY_LOB_TYPES = ['BLOB', 'IMAGE', 'BFILE', 'BINARY', 'VARBINARY', 'GEOMETRY'];
+const TEXT_LOB_TYPES = ['CLOB', 'TEXT', 'LONG'];
 
 export default {
     name: 'TableDetail',
@@ -493,7 +568,16 @@ export default {
             dmDataTypes: DM_DATA_TYPES,
 
             showAllColumns: false, expandedTableList: [], graphNodeIds: [],
-            sqlConfirmVisible: false, generatedSql: '', altering: false
+            sqlConfirmVisible: false, generatedSql: '', altering: false,
+
+            // LOB 预览相关
+            previewVisible: false,
+            previewType: 'text',
+            previewContent: '',
+            previewUrl: '',
+            previewLoading: false,
+            currentLobRow: null,
+            currentLobCol: null,
         };
     },
 
@@ -528,6 +612,10 @@ export default {
             if (this.hasMixedConflict) return { class: 'conflict-mixed', icon: 'el-icon-warning' };
             if (this.isParentMissing) return { class: 'conflict-missing', icon: 'el-icon-error' };
             return { class: 'conflict-ref', icon: 'el-icon-connection' };
+        },
+        previewTitle() {
+            if (!this.currentLobCol) return '预览';
+            return `预览 ${this.currentLobCol.COLUMN_NAME} (${this.currentLobCol.DATA_TYPE})`;
         }
     },
 
@@ -599,7 +687,6 @@ export default {
             else { this.destroyGraph(); if (mode === 'data') this.loadData(); }
         },
 
-        // 加载表注释
         async loadTableComment() {
             try {
                 const sql = `SELECT COMMENTS FROM ALL_TAB_COMMENTS WHERE OWNER='${this.currentSchema}' AND TABLE_NAME='${this.activeTable}' AND TABLE_TYPE IN ('TABLE', 'VIEW')`;
@@ -619,7 +706,6 @@ export default {
             this.editCommentVisible = true;
         },
 
-        // 提交注释并通知父组件同步
         async submitComment() {
             this.altering = true;
             try {
@@ -643,7 +729,7 @@ export default {
 
         async loadData() {
             this.resetEditState(); this.selectedRows = []; this.loading = true;
-            this.loadTableComment(); // 加载注释
+            this.loadTableComment();
 
             try {
                 const colRes = await this.request('get', '/columns', { schema: this.currentSchema, tableName: this.activeTable });
@@ -714,23 +800,18 @@ export default {
         finishEditing(row, colName) { this.editingCell = null; const id = row.DB_INTERNAL_ID; if (!id) return; const originalRow = this.originalDataMap[id]; let newVal = row[colName]; let oldVal = originalRow ? originalRow[colName] : ''; if (newVal == null) newVal = ''; if (oldVal == null) oldVal = ''; if (String(newVal) !== String(oldVal)) { this.modifiedRows.add(id); this.modifiedRows = new Set(this.modifiedRows); } },
         getCellStyle({ row, column }) { const id = row.DB_INTERNAL_ID; const col = column.property; if (!id && row._tempId) return { backgroundColor: '#f0f9eb' }; if (this.modifiedRows.has(id)) { const original = this.originalDataMap[id]; let newVal = row[col]; let oldVal = original ? original[col] : ''; if (newVal == null) newVal = ''; if (oldVal == null) oldVal = ''; if (String(newVal) !== String(oldVal)) return { backgroundColor: '#fdf6ec', color: '#E6A23C', fontWeight: 'bold' }; } return {}; },
 
-        // [修改] 插入新行时，优先使用 DATA_DEFAULT
         handleAddRow(prefillValue = null, prefillField = null) {
             const newRow = { _tempId: 'NEW_' + Date.now() + Math.random().toString(36).substr(2, 5) };
 
             this.tableColumns.forEach(c => {
                 let defVal = null;
                 if (c.DATA_DEFAULT !== undefined && c.DATA_DEFAULT !== null) {
-                    // 清理默认值：去除两端的单引号
                     let rawDefault = String(c.DATA_DEFAULT).trim();
                     if (rawDefault.startsWith("'") && rawDefault.endsWith("'")) {
                         defVal = rawDefault.substring(1, rawDefault.length - 1);
                     } else if (!isNaN(rawDefault)) {
-                        // 如果是纯数字，直接使用
                         defVal = rawDefault;
                     }
-                    // 注意：如果是函数（如 SYSDATE），直接填入可能会导致前端组件报错或保存失败，
-                    // 这里暂且只处理字面量。
                 }
                 newRow[c.COLUMN_NAME] = defVal;
             });
@@ -849,24 +930,18 @@ export default {
             try {
                 const colRes = await this.request('get', '/columns', { schema: this.currentSchema, tableName: this.activeTable });
                 const cols = colRes.data.data;
-                // [核心修改] 映射列信息，区分 length 和 scale
                 this.originalColumns = JSON.parse(JSON.stringify(cols.map(c => {
                     let len = '';
                     let scale = '';
                     const type = c.DATA_TYPE ? c.DATA_TYPE.toUpperCase() : '';
 
-                    // 1. 数值类型：优先使用精度和标度
                     if (['NUMBER', 'DECIMAL', 'NUMERIC', 'FLOAT', 'DOUBLE', 'REAL'].includes(type)) {
                         len = c.DATA_PRECISION !== null ? String(c.DATA_PRECISION) : '';
                         scale = c.DATA_SCALE !== null ? String(c.DATA_SCALE) : '';
-                    }
-                    // 2. 无长度类型 (INTEGER, DATE 等)：置空
-                    else if (NO_LENGTH_TYPES.includes(type)) {
+                    } else if (NO_LENGTH_TYPES.includes(type)) {
                         len = '';
                         scale = '';
-                    }
-                    // 3. 字符类型：使用 DATA_LENGTH
-                    else {
+                    } else {
                         len = c.DATA_LENGTH ? String(c.DATA_LENGTH) : '';
                         scale = '';
                     }
@@ -874,7 +949,7 @@ export default {
                     return {
                         ...c,
                         DATA_LENGTH: len,
-                        DATA_SCALE: scale, // 新增 scale 字段
+                        DATA_SCALE: scale,
                         COMMENTS: c.COMMENTS || '',
                         DATA_DEFAULT: c.DATA_DEFAULT || '',
                         IS_PK: ['1', 1, 'Y', 'y', 'true', true].includes(c.IS_PK)
@@ -917,7 +992,7 @@ export default {
                 COLUMN_NAME: '',
                 DATA_TYPE: 'VARCHAR2',
                 DATA_LENGTH: '50',
-                DATA_SCALE: '', // 初始化 scale
+                DATA_SCALE: '',
                 DATA_DEFAULT: '',
                 NULLABLE: 'Y',
                 IS_PK: false,
@@ -927,26 +1002,15 @@ export default {
         removeDesignColumn(index, row) { if (row._status !== 'new') this.deleteColumnList.push(row.COLUMN_NAME); this.designColumns.splice(index, 1); },
 
         isLengthDisabled(type) { if (!type) return false; return NO_LENGTH_TYPES.includes(type.toUpperCase()); },
-        // [新增] 判断标度是否禁用
-        isScaleDisabled(type) {
-            if (!type) return true;
-            return !SCALE_TYPES.includes(type.toUpperCase());
-        },
+        isScaleDisabled(type) { if (!type) return true; return !SCALE_TYPES.includes(type.toUpperCase()); },
 
-        getLengthPlaceholder(type) {
-            if (!type) return '';
-            const t = type.toUpperCase();
-            if (NO_LENGTH_TYPES.includes(t)) return '无';
-            return '长度';
-        },
-
+        getLengthPlaceholder(type) { if (!type) return ''; const t = type.toUpperCase(); if (NO_LENGTH_TYPES.includes(t)) return '无'; return '长度'; },
         handleTypeChange(row) { if (this.isLengthDisabled(row.DATA_TYPE)) { row.DATA_LENGTH = ''; } this.markModified(row); },
 
         markModified(row) {
             if (row._status === 'new') return;
             const original = this.originalColumns.find(o => o.COLUMN_NAME === row._originalName);
             if (!original) return;
-            // [修改] 增加 DATA_SCALE 的对比
             const isChanged = this.isDiff(row.COLUMN_NAME, original.COLUMN_NAME) ||
                 this.isDiff(row.DATA_TYPE, original.DATA_TYPE) ||
                 this.isDiff(row.DATA_LENGTH, original.DATA_LENGTH) ||
@@ -975,7 +1039,6 @@ export default {
                 if (!original) return;
                 if (this.isDiff(c.COLUMN_NAME, c._originalName)) sqls.push(`ALTER TABLE "${s}"."${t}" RENAME COLUMN "${c._originalName}" TO "${c.COLUMN_NAME}";`);
 
-                // [修改] 构建类型定义字符串
                 let typeLen = c.DATA_TYPE;
                 if (!NO_LENGTH_TYPES.includes(c.DATA_TYPE.toUpperCase()) && c.DATA_LENGTH) {
                     if (c.DATA_SCALE && !this.isScaleDisabled(c.DATA_TYPE)) {
@@ -988,8 +1051,6 @@ export default {
                 let modifySql = `ALTER TABLE "${s}"."${t}" MODIFY "${c.COLUMN_NAME}" ${typeLen}`;
                 if (this.isDiff(c.DATA_DEFAULT, original.DATA_DEFAULT)) { modifySql += (c.DATA_DEFAULT ? ` DEFAULT ${c.DATA_DEFAULT}` : ` DEFAULT NULL`); }
                 if (this.isDiff(c.NULLABLE, original.NULLABLE)) modifySql += (c.NULLABLE === 'N' ? ' NOT NULL' : ' NULL');
-
-                // [修改] 增加 DATA_SCALE 的变更检测
                 const isAttrChanged = this.isDiff(c.DATA_TYPE, original.DATA_TYPE) ||
                     this.isDiff(c.DATA_LENGTH, original.DATA_LENGTH) ||
                     this.isDiff(c.DATA_SCALE, original.DATA_SCALE) ||
@@ -1008,7 +1069,6 @@ export default {
             }
 
             this.designColumns.filter(c => c._status === 'new').forEach(c => {
-                // [修改] 构建新列 SQL
                 let l = `ALTER TABLE "${s}"."${t}" ADD "${c.COLUMN_NAME}" ${c.DATA_TYPE}`;
                 if (!NO_LENGTH_TYPES.includes(c.DATA_TYPE.toUpperCase()) && c.DATA_LENGTH) {
                     if (c.DATA_SCALE && !this.isScaleDisabled(c.DATA_TYPE)) {
@@ -1073,6 +1133,142 @@ export default {
             this.graphInstance.data(JSON.parse(JSON.stringify(data))); this.graphInstance.render();
             this.graphInstance.on('node:click', (e) => { const shapeName = e.target.get('name'); const nodeId = e.item.getModel().id; if (shapeName === 'expand-text') { if (!this.expandedTableList.includes(nodeId)) { this.expandedTableList.push(nodeId); this.loadRelations(); } } else if (shapeName === 'collapse-text') { const index = this.expandedTableList.indexOf(nodeId); if (index > -1) { this.expandedTableList.splice(index, 1); this.showAllColumns = false; this.loadRelations(); } } });
             this.graphInstance.on('node:dblclick', (e) => { const t = e.item.getModel().label; if (t !== this.activeTable) this.$emit('open-table', { connId: this.connId, schema: this.currentSchema, tableName: t, initViewMode: 'data' }); });
+        },
+
+        // [辅助] 判断类型
+        isBinaryLob(type) {
+            return type && BINARY_LOB_TYPES.includes(type.toUpperCase());
+        },
+        isTextLob(type) {
+            return type && TEXT_LOB_TYPES.includes(type.toUpperCase());
+        },
+        isLob(type) {
+            return this.isBinaryLob(type) || this.isTextLob(type);
+        },
+
+        // [新增] 触发文件选择
+        triggerFileSelect(rowIndex, colName) {
+            const el = document.getElementById(`file-${rowIndex}-${colName}`);
+            if (el) el.click();
+        },
+
+        // [新增] 处理行内文件上传 (转Base64)
+        handleInlineFileUpload(event, row, colName) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // 限制一下大小，比如 10MB，防止浏览器卡死
+            if (file.size > 10 * 1024 * 1024) {
+                this.$message.warning("文件过大，建议保存行数据后使用单独的上传功能");
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                // 将 Base64 赋值给 row，后端会识别并处理
+                this.$set(row, colName, e.target.result);
+
+                // 标记该行已被修改 (如果是现有行)
+                if (row.DB_INTERNAL_ID) {
+                    this.modifiedRows.add(row.DB_INTERNAL_ID);
+                    this.modifiedRows = new Set(this.modifiedRows); // 触发响应式
+                }
+            };
+            reader.readAsDataURL(file);
+        },
+
+        // [新增] 清除行内文件
+        clearInlineFile(row, colName) {
+            this.$set(row, colName, null);
+            const el = document.getElementById(`file-${row._tempId}-${colName}`);
+            if (el) el.value = '';
+        },
+
+        handlePreviewLob(row, col) {
+            this.currentLobRow = row;
+            this.currentLobCol = col;
+            this.previewLoading = true;
+            this.previewContent = '';
+            this.previewUrl = '';
+
+            // 判断类型
+            const type = col.DATA_TYPE.toUpperCase();
+            if (type === 'IMAGE' || type === 'BLOB') {
+                this.previewType = 'image';
+                this.previewUrl = this.getLobUrl(row, col, false);
+            } else {
+                this.previewType = 'text';
+                this.fetchLobText(row, col);
+            }
+            this.previewVisible = true;
+            this.previewLoading = false;
+        },
+        getLobUrl(row, col, download) {
+            const baseUrl = process.env.VUE_APP_BASE_API || '/api';
+            return `${baseUrl}/db/lob/preview?schema=${this.currentSchema}&tableName=${this.activeTable}&colName=${col.COLUMN_NAME}&rowId=${row.DB_INTERNAL_ID}&download=${download}`;
+        },
+        async fetchLobText(row, col) {
+            this.previewLoading = true;
+            try {
+                const res = await this.request('get', '/lob/preview', {
+                    schema: this.currentSchema,
+                    tableName: this.activeTable,
+                    colName: col.COLUMN_NAME,
+                    rowId: row.DB_INTERNAL_ID,
+                    download: false
+                });
+                if (typeof res.data === 'string') {
+                    this.previewContent = res.data;
+                } else {
+                    this.previewContent = JSON.stringify(res.data, null, 2);
+                }
+            } catch (e) {
+                this.previewContent = "加载失败: " + e.message;
+            } finally {
+                this.previewLoading = false;
+            }
+        },
+        handleDownloadLob(row, col) {
+            const url = this.getLobUrl(row, col, true);
+            window.open(url, '_blank');
+        },
+        handleUploadLob(row, col) {
+            this.currentLobRow = row;
+            this.currentLobCol = col;
+            this.$refs.lobFileInput.value = null;
+            this.$refs.lobFileInput.click();
+        },
+        async handleFileChange(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('schema', this.currentSchema);
+            formData.append('tableName', this.activeTable);
+            formData.append('colName', this.currentLobCol.COLUMN_NAME);
+            formData.append('rowId', this.currentLobRow.DB_INTERNAL_ID);
+
+            const loadingInstance = this.$loading({ lock: true, text: '正在上传...', background: 'rgba(0, 0, 0, 0.7)' });
+
+            try {
+                const res = await this.request('post', '/lob/upload', formData);
+                loadingInstance.close();
+                if (res.data.code === 200) {
+                    this.$message.success('上传成功');
+                    this.loadData();
+                } else {
+                    this.$message.error(res.data.msg);
+                }
+            } catch (e) {
+                loadingInstance.close();
+                this.handleError(e, '上传失败');
+            }
+        },
+        downloadCurrentLob() {
+            if (this.currentLobRow && this.currentLobCol) {
+                this.handleDownloadLob(this.currentLobRow, this.currentLobCol);
+            }
         }
     },
     beforeDestroy() { this.destroyGraph(); }
@@ -1080,7 +1276,7 @@ export default {
 </script>
 
 <style scoped>
-/* 样式保持不变，省略以节省篇幅 */
+/* 样式保持不变 */
 .table-detail-wrapper {
     height: 100%;
     display: flex;
@@ -1436,5 +1632,25 @@ export default {
 .edit-comment-btn:hover {
     background-color: #ecf5ff;
     border-radius: 4px;
+}
+
+.preview-dialog {
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+/* 增加样式 */
+.placeholder-text {
+    color: #C0C4CC;
+    font-style: italic;
+    font-size: 12px;
+}
+
+/* 优化大文本输入体验 */
+.inline-input-box textarea {
+    font-family: Consolas, monospace;
+    line-height: 1.4;
+    resize: none;
+    /* 禁用手动调整大小，使用 autosize */
 }
 </style>
