@@ -2,36 +2,52 @@ package com.example.dmdb.service.impl;
 
 import com.example.dmdb.common.Result;
 import com.example.dmdb.config.DynamicContext;
+import com.example.dmdb.mapper.MetadataMapper;
+import com.example.dmdb.mapper.TableDataMapper;
 import com.example.dmdb.service.ConnectionManager;
 import com.example.dmdb.service.base.AbstractDbService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.interceptor.TransactionAspectSupport;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.servlet.http.HttpServletResponse;
+import java.io.BufferedInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.Reader;
 import java.io.Writer;
-import java.sql.Blob;
-import java.sql.Clob;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.sql.*;
 import java.util.*;
 
 @Service
 public class TableDataServiceImpl extends AbstractDbService {
 
+    private static final Logger log = LoggerFactory.getLogger(TableDataServiceImpl.class);
+
+    @Autowired
+    private TableDataMapper tableDataMapper;
+
+    @Autowired
+    private MetadataMapper metadataMapper;
+
+    /**
+     * 获取表数据 (分页)
+     */
     public Result<Map<String, Object>> getData(String schema, String tableName, int page, int size) {
         validateIdentifiers(schema, tableName);
         int offset = (page - 1) * size;
+
         long total = tableDataMapper.countData(schema, tableName);
         // 获取原始数据
         List<Map<String, Object>> list = processResultList(tableDataMapper.getDataPage(schema, tableName, size, offset));
 
-        // 【新增】处理 LOB 字段，避免列表页加载过大内容
+        // 【新增】处理 LOB 字段脱敏 (只处理非空值，空值保留 null 以便前端展示上传控件)
         maskLobFields(list);
 
         Map<String, Object> res = new HashMap<>();
@@ -46,6 +62,9 @@ public class TableDataServiceImpl extends AbstractDbService {
         return Result.success(res);
     }
 
+    /**
+     * 筛选表数据
+     */
     public Result<Map<String, Object>> filterData(Map<String, Object> payload) {
         String schema = (String) payload.get("schema");
         String tableName = (String) payload.get("tableName");
@@ -58,10 +77,9 @@ public class TableDataServiceImpl extends AbstractDbService {
 
         validateIdentifiers(schema, tableName);
         long total = tableDataMapper.countByConditions(schema, tableName, conditions, logic);
-        // 获取原始数据
         List<Map<String, Object>> list = processResultList(tableDataMapper.queryByConditionsPage(schema, tableName, conditions, logic, size, offset));
 
-        // 【新增】处理 LOB 字段
+        // 【新增】处理 LOB 字段脱敏
         maskLobFields(list);
 
         Map<String, Object> res = new HashMap<>();
@@ -71,10 +89,6 @@ public class TableDataServiceImpl extends AbstractDbService {
         return Result.success(res);
     }
 
-    // --------------------------------------------------------------------------------
-    // 【核心修改】新增/修改保存逻辑，支持 Base64 -> BLOB 自动转换
-    // --------------------------------------------------------------------------------
-
     /**
      * 单条数据保存 (新增/更新)
      */
@@ -82,7 +96,7 @@ public class TableDataServiceImpl extends AbstractDbService {
     public Result<Object> saveData(String schema, String tableName, Map<String, Object> row) {
         validateIdentifiers(schema, tableName);
         try {
-            // 【修改】预处理 LOB 数据 (Base64 -> byte[])
+            // 【新增】预处理 LOB 数据 (Base64 -> byte[])
             preprocessLobData(schema, tableName, Collections.singletonList(row));
 
             Object internalId = row.get("DB_INTERNAL_ID");
@@ -122,7 +136,7 @@ public class TableDataServiceImpl extends AbstractDbService {
         List<Map<String, Object>> insertList = payload.get("insertList");
         List<Map<String, Object>> updateList = payload.get("updateList");
 
-        // 【修改】预处理 LOB 数据
+        // 【新增】预处理 LOB 数据
         List<Map<String, Object>> allRows = new ArrayList<>();
         if (insertList != null) allRows.addAll(insertList);
         if (updateList != null) allRows.addAll(updateList);
@@ -157,7 +171,6 @@ public class TableDataServiceImpl extends AbstractDbService {
             exceptionMsg = e.getMessage();
             TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
 
-            // 冲突分析逻辑 (保持不变)
             if (allRows.isEmpty() && insertList != null) allRows.addAll(insertList);
             if (allRows.isEmpty() && updateList != null) allRows.addAll(updateList);
 
@@ -172,12 +185,14 @@ public class TableDataServiceImpl extends AbstractDbService {
                             Map<String, Object> oldRow = tableDataMapper.getDataByRowId(schema, tableName, row.get("DB_INTERNAL_ID").toString());
                             if (oldRow != null) pkVal = oldRow.get(pkCol);
                         }
-                    } catch (Exception ex) {}
+                    } catch (Exception ex) {
+                    }
                 } else {
                     try {
                         String pkCol = metadataMapper.getPkColumn(schema, tableName);
                         if (pkCol != null) pkVal = row.get(pkCol);
-                    } catch (Exception ex) {}
+                    } catch (Exception ex) {
+                    }
                 }
 
                 Result<Object> res = analyzeConflict(null, schema, tableName, pkVal, row);
@@ -193,14 +208,12 @@ public class TableDataServiceImpl extends AbstractDbService {
 
                         Object cntVal = c.get("CNT");
                         Object currentCnt = agg.get("CNT");
-
                         if ("MISSING".equals(cntVal) || "MISSING".equals(currentCnt)) {
                             agg.put("CNT", "MISSING");
                         } else {
                             int existing = currentCnt != null ? (Integer) currentCnt : 0;
                             agg.put("CNT", existing + (Integer) cntVal);
                         }
-
                         List<Object> valList = (List<Object>) agg.getOrDefault("MY_VAL_LIST", new ArrayList<>());
                         valList.add(c.get("MY_VAL"));
                         agg.put("MY_VAL_LIST", valList);
@@ -223,78 +236,8 @@ public class TableDataServiceImpl extends AbstractDbService {
     }
 
     /**
-     * 【新增】处理结果集中的 LOB 对象
-     * 将 Blob/Clob 等对象转换为字符串占位符
+     * 单行删除
      */
-    private void maskLobFields(List<Map<String, Object>> list) {
-        if (list == null || list.isEmpty()) return;
-        for (Map<String, Object> row : list) {
-            for (Map.Entry<String, Object> entry : row.entrySet()) {
-                Object val = entry.getValue();
-                if (val instanceof Clob) {
-                    entry.setValue("[CLOB 数据]");
-                } else if (val instanceof Blob) {
-                    entry.setValue("[BLOB 数据]");
-                } else if (val instanceof byte[]) {
-                    if (((byte[]) val).length > 100) {
-                        entry.setValue("[BINARY 数据]");
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * 【新增】预处理 LOB 数据：将 Base64 字符串转换为 byte[]
-     */
-    private void preprocessLobData(String schema, String tableName, List<Map<String, Object>> rows) {
-        if (rows == null || rows.isEmpty()) return;
-
-        // 获取列元数据，识别 BLOB 列
-        List<Map<String, Object>> columns = metadataMapper.getColumns(schema, tableName);
-        Set<String> blobColumns = new HashSet<>();
-
-        for (Map<String, Object> col : columns) {
-            String type = ((String) col.get("DATA_TYPE")).toUpperCase();
-            if (type.contains("BLOB") || type.contains("IMAGE") || type.contains("BINARY") || type.contains("VARBINARY")) {
-                blobColumns.add((String) col.get("COLUMN_NAME"));
-            }
-        }
-
-        if (blobColumns.isEmpty()) return;
-
-        for (Map<String, Object> row : rows) {
-            for (String colName : blobColumns) {
-                if (row.containsKey(colName)) {
-                    Object val = row.get(colName);
-                    // 只有当值是 String 类型且看似 Base64 时才转换
-                    if (val instanceof String) {
-                        String base64Str = (String) val;
-                        // 占位符或空值不处理
-                        if (base64Str.isEmpty() || "[BLOB 数据]".equals(base64Str) || "[BINARY 数据]".equals(base64Str)) {
-                            if (row.containsKey("DB_INTERNAL_ID")) {
-                                row.remove(colName); // 更新时不覆盖
-                            } else {
-                                row.put(colName, null); // 插入时置空
-                            }
-                        } else {
-                            try {
-                                // 处理 Data URI Scheme (e.g., "data:image/png;base64,AAAA...")
-                                if (base64Str.contains(",")) {
-                                    base64Str = base64Str.split(",")[1];
-                                }
-                                byte[] bytes = Base64.getDecoder().decode(base64Str);
-                                row.put(colName, bytes); // 替换为 byte[]
-                            } catch (IllegalArgumentException e) {
-                                // 解析失败，可能是普通文本，忽略
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     @Transactional(rollbackFor = Exception.class)
     public Result<Object> deleteData(String schema, String tableName, Object internalId, String pkValue) {
         validateIdentifiers(schema, tableName);
@@ -310,6 +253,14 @@ public class TableDataServiceImpl extends AbstractDbService {
         }
     }
 
+    // 如果 Controller 调用的是 deleteRow，这里提供一个别名方法
+    public Result<Object> deleteRow(String schema, String tableName, String internalId, String pkValue) {
+        return deleteData(schema, tableName, internalId, pkValue);
+    }
+
+    /**
+     * 批量删除
+     */
     @Transactional(rollbackFor = Exception.class)
     public Result<Object> deleteBatch(String schema, String tableName, List<String> rowIds) {
         validateIdentifiers(schema, tableName);
@@ -357,10 +308,13 @@ public class TableDataServiceImpl extends AbstractDbService {
                                     agg.put("MY_VAL_LIST", valList);
                                 }
                             }
-                        } catch (Exception ex) { }
+                        } catch (Exception ex) {
+                        }
                     }
                 }
-            } catch (Exception ex) { log.error("Batch delete conflict analysis error", ex); }
+            } catch (Exception ex) {
+                log.error("Batch delete conflict analysis error", ex);
+            }
 
             if (!aggregatedConflicts.isEmpty()) {
                 Result<Object> r = new Result<>();
@@ -375,16 +329,91 @@ public class TableDataServiceImpl extends AbstractDbService {
     }
 
     /**
+     * 【新增】处理结果集中的 LOB 对象
+     * 将 Blob/Clob 等对象转换为字符串占位符
+     * 注意：如果值为 null，则不替换，保持 null，以便前端识别为空并显示上传/输入控件
+     */
+    private void maskLobFields(List<Map<String, Object>> list) {
+        if (list == null || list.isEmpty()) return;
+        for (Map<String, Object> row : list) {
+            for (Map.Entry<String, Object> entry : row.entrySet()) {
+                Object val = entry.getValue();
+                if (val == null) continue; // 如果是 null，保持原样
+
+                if (val instanceof Clob) {
+                    entry.setValue("[CLOB 数据]");
+                } else if (val instanceof Blob) {
+                    entry.setValue("[BLOB 数据]");
+                } else if (val instanceof byte[]) {
+                    if (((byte[]) val).length > 100) {
+                        entry.setValue("[BINARY 数据]");
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 【新增】预处理 LOB 数据：将 Base64 字符串转换为 byte[]
+     */
+    private void preprocessLobData(String schema, String tableName, List<Map<String, Object>> rows) {
+        if (rows == null || rows.isEmpty()) return;
+
+        // 获取列元数据，识别 BLOB/IMAGE/BINARY 等列
+        List<Map<String, Object>> columns = metadataMapper.getColumns(schema, tableName);
+        Set<String> blobColumns = new HashSet<>();
+
+        for (Map<String, Object> col : columns) {
+            String type = ((String) col.get("DATA_TYPE")).toUpperCase();
+            if (type.contains("BLOB") || type.contains("IMAGE") || type.contains("BINARY") || type.contains("VARBINARY")) {
+                blobColumns.add((String) col.get("COLUMN_NAME"));
+            }
+        }
+
+        if (blobColumns.isEmpty()) return;
+
+        for (Map<String, Object> row : rows) {
+            for (String colName : blobColumns) {
+                if (row.containsKey(colName)) {
+                    Object val = row.get(colName);
+                    if (val instanceof String) {
+                        String base64Str = (String) val;
+                        // 占位符不处理
+                        if ("[BLOB 数据]".equals(base64Str) || "[BINARY 数据]".equals(base64Str)) {
+                            // 如果是 Update 操作，且值是占位符，说明用户没有修改这个大字段，移除它以保持原值
+                            if (row.containsKey("DB_INTERNAL_ID")) {
+                                row.remove(colName);
+                            } else {
+                                row.put(colName, null);
+                            }
+                        } else if (base64Str.isEmpty()) {
+                            row.put(colName, null);
+                        } else {
+                            try {
+                                // 处理 Base64 前缀
+                                if (base64Str.contains(",")) {
+                                    base64Str = base64Str.split(",")[1];
+                                }
+                                byte[] bytes = Base64.getDecoder().decode(base64Str);
+                                row.put(colName, bytes); // 替换为 byte[]
+                            } catch (IllegalArgumentException e) {
+                                // 忽略解析错误
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * 【新增】LOB字段预览/下载
-     * 直接向 HttpServletResponse 写入流，无需经过 MyBatis Mapper 映射，提高性能
      */
     public void previewLob(String schema, String tableName, String colName, String rowId, boolean download, HttpServletResponse response) {
         validateIdentifiers(schema, tableName);
-        // colName 也需要校验，防止 SQL 注入
-        if (!colName.matches("^[a-zA-Z0-9_]+$")) {
-            try { response.sendError(400, "非法列名"); } catch (Exception e) {}
-            return;
-        }
+        if (!colName.matches("^[a-zA-Z0-9_]+$")) return;
+
+        response.reset();
 
         String connId = DynamicContext.getKey();
         Connection conn = null;
@@ -393,7 +422,6 @@ public class TableDataServiceImpl extends AbstractDbService {
 
         try {
             conn = ConnectionManager.getNewConnection(connId);
-            // 使用 ROWID 定位效率最高
             String sql = String.format("SELECT \"%s\" FROM \"%s\".\"%s\" WHERE ROWID = ?", colName, schema, tableName);
             ps = conn.prepareStatement(sql);
             ps.setString(1, rowId);
@@ -403,20 +431,18 @@ public class TableDataServiceImpl extends AbstractDbService {
                 Object obj = rs.getObject(1);
 
                 if (obj == null) {
-                    response.getWriter().write("NULL");
                     return;
                 }
 
                 if (obj instanceof Blob) {
                     Blob blob = (Blob) obj;
-                    try (InputStream is = blob.getBinaryStream();
+                    try (InputStream is = new BufferedInputStream(blob.getBinaryStream());
                          OutputStream os = response.getOutputStream()) {
 
                         if (download) {
                             response.setContentType("application/octet-stream");
-                            response.setHeader("Content-Disposition", "attachment; filename=\"blob_data.bin\"");
+                            response.setHeader("Content-Disposition", "attachment; filename=\"" + URLEncoder.encode("blob_data.bin", "UTF-8") + "\"");
                         } else {
-                            // 默认按图片处理，浏览器无法显示的会自动下载
                             response.setContentType("image/jpeg");
                         }
 
@@ -425,12 +451,15 @@ public class TableDataServiceImpl extends AbstractDbService {
                         while ((bytesRead = is.read(buffer)) != -1) {
                             os.write(buffer, 0, bytesRead);
                         }
+                        os.flush();
                     }
                 } else if (obj instanceof Clob) {
                     Clob clob = (Clob) obj;
                     response.setContentType("text/plain; charset=UTF-8");
+                    response.setCharacterEncoding("UTF-8");
+
                     if (download) {
-                        response.setHeader("Content-Disposition", "attachment; filename=\"clob_data.txt\"");
+                        response.setHeader("Content-Disposition", "attachment; filename=\"" + URLEncoder.encode("clob_data.txt", "UTF-8") + "\"");
                     }
                     try (Reader reader = clob.getCharacterStream();
                          Writer writer = response.getWriter()) {
@@ -439,9 +468,11 @@ public class TableDataServiceImpl extends AbstractDbService {
                         while ((charsRead = reader.read(buffer)) != -1) {
                             writer.write(buffer, 0, charsRead);
                         }
+                        writer.flush();
                     }
                 } else if (obj instanceof String) {
                     response.setContentType("text/plain; charset=UTF-8");
+                    response.setCharacterEncoding("UTF-8");
                     response.getWriter().write((String) obj);
                 } else if (obj instanceof byte[]) {
                     response.setContentType("application/octet-stream");
@@ -450,16 +481,25 @@ public class TableDataServiceImpl extends AbstractDbService {
                     }
                     response.getOutputStream().write((byte[]) obj);
                 } else {
+                    response.setContentType("text/plain; charset=UTF-8");
                     response.getWriter().write("不支持预览的数据类型: " + obj.getClass().getName());
                 }
             } else {
-                response.sendError(404, "未找到记录");
+                response.sendError(404, "Not Found");
             }
         } catch (Exception e) {
             log.error("读取LOB失败", e);
-            try { response.sendError(500, "读取大字段失败: " + e.getMessage()); } catch (Exception ex) {}
+            try {
+                response.sendError(500, "读取大字段失败: " + e.getMessage());
+            } catch (Exception ex) {
+            }
         } finally {
-            try { if (rs != null) rs.close(); if (ps != null) ps.close(); if (conn != null) conn.close(); } catch (Exception e) {}
+            try {
+                if (rs != null) rs.close();
+                if (ps != null) ps.close();
+                if (conn != null) conn.close();
+            } catch (Exception e) {
+            }
         }
     }
 
@@ -472,18 +512,16 @@ public class TableDataServiceImpl extends AbstractDbService {
 
         String connId = DynamicContext.getKey();
         Connection conn = null;
-        PreparedStatement ps = null;                                        
+        PreparedStatement ps = null;
 
         try {
             conn = ConnectionManager.getNewConnection(connId);
-            // 构造更新语句
             String sql = String.format("UPDATE \"%s\".\"%s\" SET \"%s\" = ? WHERE ROWID = ?", schema, tableName, colName);
             ps = conn.prepareStatement(sql);
 
-            if (file.isEmpty()) {
-                ps.setNull(1, java.sql.Types.BLOB);
+            if (file == null || file.isEmpty()) {
+                ps.setNull(1, Types.BLOB);
             } else {
-                // 通用流式写入，驱动会自动处理 BLOB/CLOB
                 ps.setBinaryStream(1, file.getInputStream(), file.getSize());
             }
 
@@ -499,7 +537,11 @@ public class TableDataServiceImpl extends AbstractDbService {
             log.error("上传LOB失败", e);
             return Result.error("上传失败: " + e.getMessage());
         } finally {
-            try { if (ps != null) ps.close(); if (conn != null) conn.close(); } catch (Exception e) {}
+            try {
+                if (ps != null) ps.close();
+                if (conn != null) conn.close();
+            } catch (Exception e) {
+            }
         }
     }
 }

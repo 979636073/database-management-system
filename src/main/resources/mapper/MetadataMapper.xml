@@ -47,8 +47,17 @@
     </select>
 
     <select id="getColumnsForTables" resultType="map">
-        SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, (SELECT COUNT(1) FROM ALL_CONSTRAINTS AC JOIN ALL_CONS_COLUMNS ACC ON AC.CONSTRAINT_NAME = ACC.CONSTRAINT_NAME WHERE AC.CONSTRAINT_TYPE='P' AND AC.OWNER=T.OWNER AND AC.TABLE_NAME=T.TABLE_NAME AND ACC.COLUMN_NAME=T.COLUMN_NAME) as IS_PK
-        FROM ALL_TAB_COLUMNS T WHERE OWNER = #{schema} AND TABLE_NAME IN <foreach collection="tableList" item="t" open="(" separator="," close=")">#{t}</foreach>
+        SELECT
+        T.TABLE_NAME,
+        T.COLUMN_NAME,
+        T.DATA_TYPE,
+        C.COMMENTS,
+        (SELECT COUNT(1) FROM ALL_CONSTRAINTS AC JOIN ALL_CONS_COLUMNS ACC ON AC.CONSTRAINT_NAME = ACC.CONSTRAINT_NAME WHERE AC.CONSTRAINT_TYPE='P' AND AC.OWNER=T.OWNER AND AC.TABLE_NAME=T.TABLE_NAME AND ACC.COLUMN_NAME=T.COLUMN_NAME) as IS_PK
+        FROM ALL_TAB_COLUMNS T
+        LEFT JOIN ALL_COL_COMMENTS C ON T.OWNER = C.OWNER AND T.TABLE_NAME = C.TABLE_NAME AND T.COLUMN_NAME = C.COLUMN_NAME
+        WHERE T.OWNER = #{schema}
+        AND T.TABLE_NAME IN <foreach collection="tableList" item="t" open="(" separator="," close=")">#{t}</foreach>
+        ORDER BY T.TABLE_NAME, T.COLUMN_ID
     </select>
 
     <select id="getTableComments" resultType="map">
@@ -70,11 +79,8 @@
         FROM ALL_INDEXES I
         WHERE I.TABLE_OWNER = #{schema}
           AND I.TABLE_NAME = #{tableName}
-          -- 1. 排除系统生成的索引 (通常由数据库自动维护)
           AND I.GENERATED = 'N'
-          -- 2. 排除 LOB 字段的内部索引
           AND I.INDEX_TYPE NOT LIKE 'LOB%'
-          -- 3. 排除主键(Primary Key)关联的索引，因为主键已在列属性中显示，避免重复
           AND NOT EXISTS (
               SELECT 1
               FROM ALL_CONSTRAINTS C

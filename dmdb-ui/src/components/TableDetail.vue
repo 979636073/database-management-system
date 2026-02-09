@@ -154,7 +154,8 @@
                                         </template>
                                         <template slot-scope="scope">
                                             <div v-if="isBinaryLob(col.DATA_TYPE)">
-                                                <div v-if="!isReadOnly && !scope.row.DB_INTERNAL_ID">
+                                                <div
+                                                    v-if="!isReadOnly && (isCellEditing(scope.row, col.COLUMN_NAME) || !scope.row.DB_INTERNAL_ID || !hasLobData(scope.row, col))">
                                                     <input type="file"
                                                         :id="'file-' + scope.$index + '-' + col.COLUMN_NAME"
                                                         style="display:none"
@@ -170,7 +171,7 @@
                                                         @click="clearInlineFile(scope.row, col.COLUMN_NAME)"
                                                         title="清除"></el-button>
                                                 </div>
-                                                <div v-else-if="scope.row.DB_INTERNAL_ID">
+                                                <div v-else-if="scope.row.DB_INTERNAL_ID && hasLobData(scope.row, col)">
                                                     <el-tag size="mini" type="info" style="margin-right: 5px;">{{
                                                         col.DATA_TYPE }}</el-tag>
                                                     <el-button type="text" size="mini" icon="el-icon-view" title="查看/预览"
@@ -179,14 +180,14 @@
                                                         title="下载"
                                                         @click="handleDownloadLob(scope.row, col)"></el-button>
                                                     <el-button type="text" size="mini" icon="el-icon-upload2"
-                                                        title="上传覆盖" @click="handleUploadLob(scope.row, col)"
+                                                        title="上传/替换" @click="handleUploadLob(scope.row, col)"
                                                         v-if="!isReadOnly"></el-button>
                                                 </div>
                                                 <span v-else class="placeholder-text">NULL</span>
                                             </div>
 
                                             <div v-else-if="isTextLob(col.DATA_TYPE)">
-                                                <div v-if="!isReadOnly && (isCellEditing(scope.row, col.COLUMN_NAME) || !scope.row.DB_INTERNAL_ID)"
+                                                <div v-if="!isReadOnly && (isCellEditing(scope.row, col.COLUMN_NAME) || !scope.row.DB_INTERNAL_ID || !hasLobData(scope.row, col))"
                                                     class="inline-input-box">
                                                     <el-input type="textarea" :rows="1" autosize
                                                         v-model="scope.row[col.COLUMN_NAME]"
@@ -194,7 +195,7 @@
                                                         placeholder="请输入...">
                                                     </el-input>
                                                 </div>
-                                                <div v-else-if="scope.row.DB_INTERNAL_ID">
+                                                <div v-else-if="scope.row.DB_INTERNAL_ID && hasLobData(scope.row, col)">
                                                     <el-tag size="mini" type="info"
                                                         style="margin-right: 5px;">CLOB</el-tag>
                                                     <el-button type="text" size="mini" icon="el-icon-document"
@@ -296,17 +297,20 @@
 
         <el-dialog title="编辑视图定义" :visible.sync="editViewVisible" width="900px" append-to-body
             :close-on-click-modal="false">
-            <div style="margin-bottom: 10px;">
-                <el-alert title="修改视图定义将执行 CREATE OR REPLACE VIEW 语句。" type="warning" show-icon
-                    :closable="false"></el-alert>
-            </div>
+            <div style="margin-bottom: 10px;"><el-alert title="修改视图定义将执行 CREATE OR REPLACE VIEW 语句。" type="warning"
+                    show-icon :closable="false"></el-alert></div>
             <div style="height: 450px; border: 1px solid #dcdfe6;">
                 <SqlEditor v-model="viewSql" language="sql" />
             </div>
-            <div slot="footer">
-                <el-button @click="editViewVisible = false">取消</el-button>
-                <el-button type="primary" @click="submitViewAlter" :loading="altering">保存修改</el-button>
+            <div slot="footer"><el-button @click="editViewVisible = false">取消</el-button><el-button type="primary"
+                    @click="submitViewAlter" :loading="altering">保存修改</el-button></div>
+        </el-dialog>
+
+        <el-dialog title="DDL 预览" :visible.sync="ddlVisible" width="800px" append-to-body>
+            <div style="height: 500px; border: 1px solid #dcdfe6;">
+                <SqlEditor v-model="currentDDL" :readOnly="true" />
             </div>
+            <div slot="footer"><el-button @click="ddlVisible = false">关闭</el-button></div>
         </el-dialog>
 
         <el-dialog :title="conflictTitle" :visible.sync="conflictVisible" width="800px" append-to-body
@@ -353,13 +357,6 @@
             <div slot="footer"><el-button @click="conflictVisible = false">关 闭</el-button></div>
         </el-dialog>
 
-        <el-dialog title="DDL 预览" :visible.sync="ddlVisible" width="800px" append-to-body>
-            <div style="height: 500px; border: 1px solid #dcdfe6;">
-                <SqlEditor v-model="currentDDL" :readOnly="true" />
-            </div>
-            <div slot="footer"><el-button @click="ddlVisible = false">关闭</el-button></div>
-        </el-dialog>
-
         <el-dialog title="设计表结构" :visible.sync="designVisible" width="1100px" append-to-body
             :close-on-click-modal="false" top="5vh">
             <div style="margin-bottom: 10px;"><el-alert title="注意：修改结构会生成 ALTER TABLE 语句。请谨慎操作。" type="warning"
@@ -376,41 +373,22 @@
                         <el-table-column label="列名" width="150"><template slot-scope="scope"><el-input
                                     v-model="scope.row.COLUMN_NAME" @change="markModified(scope.row)"
                                     size="mini"></el-input></template></el-table-column>
-
-                        <el-table-column label="类型" width="130">
-                            <template slot-scope="scope">
-                                <el-select v-model="scope.row.DATA_TYPE" @change="handleTypeChange(scope.row)"
-                                    size="mini" filterable allow-create>
-                                    <el-option v-for="type in dmDataTypes" :key="type" :label="type"
-                                        :value="type"></el-option>
-                                </el-select>
-                            </template>
-                        </el-table-column>
-
-                        <el-table-column label="长度/精度" width="100">
-                            <template slot-scope="scope">
-                                <el-input v-model="scope.row.DATA_LENGTH" @change="markModified(scope.row)" size="mini"
+                        <el-table-column label="类型" width="130"><template slot-scope="scope"><el-select
+                                    v-model="scope.row.DATA_TYPE" @change="handleTypeChange(scope.row)" size="mini"
+                                    filterable allow-create><el-option v-for="type in dmDataTypes" :key="type"
+                                        :label="type"
+                                        :value="type"></el-option></el-select></template></el-table-column>
+                        <el-table-column label="长度/精度" width="100"><template slot-scope="scope"><el-input
+                                    v-model="scope.row.DATA_LENGTH" @change="markModified(scope.row)" size="mini"
                                     :disabled="isLengthDisabled(scope.row.DATA_TYPE)"
-                                    :placeholder="getLengthPlaceholder(scope.row.DATA_TYPE)">
-                                </el-input>
-                            </template>
-                        </el-table-column>
-
-                        <el-table-column label="标度" width="80">
-                            <template slot-scope="scope">
-                                <el-input v-model="scope.row.DATA_SCALE" @change="markModified(scope.row)" size="mini"
-                                    :disabled="isScaleDisabled(scope.row.DATA_TYPE)" placeholder="0">
-                                </el-input>
-                            </template>
-                        </el-table-column>
-
-                        <el-table-column label="默认值" width="120">
-                            <template slot-scope="scope">
-                                <el-input v-model="scope.row.DATA_DEFAULT" @change="markModified(scope.row)" size="mini"
-                                    placeholder="无"></el-input>
-                            </template>
-                        </el-table-column>
-
+                                    :placeholder="getLengthPlaceholder(scope.row.DATA_TYPE)"></el-input></template></el-table-column>
+                        <el-table-column label="标度" width="80"><template slot-scope="scope"><el-input
+                                    v-model="scope.row.DATA_SCALE" @change="markModified(scope.row)" size="mini"
+                                    :disabled="isScaleDisabled(scope.row.DATA_TYPE)"
+                                    placeholder="0"></el-input></template></el-table-column>
+                        <el-table-column label="默认值" width="120"><template slot-scope="scope"><el-input
+                                    v-model="scope.row.DATA_DEFAULT" @change="markModified(scope.row)" size="mini"
+                                    placeholder="无"></el-input></template></el-table-column>
                         <el-table-column label="主键" width="50"><template slot-scope="scope"><el-checkbox
                                     v-model="scope.row.IS_PK"
                                     @change="handlePkChange(scope.row)"></el-checkbox></template></el-table-column>
@@ -494,31 +472,145 @@ import request from '@/utils/request';
 import G6 from '@antv/g6';
 import SqlEditor from './SqlEditor.vue';
 
-// G6 RegisterNode
-G6.registerNode('db-table', {
-    draw: (cfg, group) => {
-        const { label, tableComment, columns = [], isCenter, isTruncated, totalColCount } = cfg;
-        const width = 300; const headerHeight = 50; const rowHeight = 28; const contentHeight = columns.length * rowHeight;
-        let footerHeight = 0; if (isTruncated) footerHeight = 24; else if (totalColCount > 10) footerHeight = 24;
-        const height = headerHeight + contentHeight + footerHeight + 8;
-        group.addShape('rect', { attrs: { x: 0, y: 0, width, height, fill: '#fff', stroke: isCenter ? '#409EFF' : '#DCDFE6', lineWidth: 1, radius: 4 }, name: 'container-shape' });
-        group.addShape('rect', { attrs: { x: 0, y: 0, width, height: headerHeight, fill: isCenter ? '#409EFF' : '#F2F6FC', radius: [4, 4, 0, 0] }, name: 'header-shape' });
-        group.addShape('text', { attrs: { x: 10, y: 20, text: label, fill: isCenter ? '#fff' : '#333', fontSize: 13, fontWeight: 'bold', textBaseline: 'middle' }, name: 'title-text' });
-        if (tableComment) group.addShape('text', { attrs: { x: 10, y: 38, text: tableComment, fill: isCenter ? '#eee' : '#909399', fontSize: 11, textBaseline: 'middle' }, name: 'comment-text' });
-        columns.forEach((col, i) => {
-            const y = headerHeight + (i * rowHeight) + (rowHeight / 2);
-            group.addShape('text', { attrs: { x: 28, y: y, text: col.COLUMN_NAME, fill: col.IS_PK ? '#E6A23C' : '#333', fontSize: 12, textBaseline: 'middle', fontWeight: col.IS_PK ? 'bold' : 'normal' } });
-            if (col.IS_PK) group.addShape('circle', { attrs: { x: 14, y: y, r: 3, fill: '#E6A23C' } });
-            if (col.COMMENTS) { let comment = col.COMMENTS; if (comment.length > 10) comment = comment.substring(0, 10) + '...'; group.addShape('text', { attrs: { x: 160, y: y, text: comment, fill: '#909399', fontSize: 11, textBaseline: 'middle' } }); }
-        });
-        const y = headerHeight + contentHeight + 12;
-        if (isTruncated) group.addShape('text', { attrs: { x: width / 2, y: y, text: `... (共 ${totalColCount} 列，点击展开)`, fill: '#909399', fontSize: 11, textAlign: 'center', textBaseline: 'middle', cursor: 'pointer' }, name: 'expand-text' });
-        else if (totalColCount > 10) group.addShape('text', { attrs: { x: width / 2, y: y, text: '⬆ 点击折叠', fill: '#409EFF', fontSize: 11, textAlign: 'center', textBaseline: 'middle', cursor: 'pointer' }, name: 'collapse-text' });
-        return group.get('children')[0];
-    }
-});
+ // [修改] G6 RegisterNode: 自动宽度适配
+    G6.registerNode('db-table', {
+        draw: (cfg, group) => {
+            const { label, tableComment, columns = [], isCenter, isTruncated, totalColCount } = cfg;
 
-// 类型常量
+            // 辅助方法：计算文字宽度
+            const calcWidth = (str, fontSize) => {
+                if (!str) return 0;
+                let w = 0;
+                for (let i = 0; i < str.length; i++) {
+                    w += (str.charCodeAt(i) > 255) ? fontSize : fontSize * 0.6;
+                }
+                return w;
+            };
+
+            const fontSize = 10;
+            const headerFontSize = 12;
+
+            // 1. 计算各列最大宽度
+            let maxLeftW = 0; // 列名 + 注释
+            let maxTypeW = 0; // 数据类型
+
+            columns.forEach(col => {
+                const nameW = calcWidth(col.COLUMN_NAME, fontSize);
+                const commentW = col.COMMENTS ? calcWidth(`(${col.COMMENTS})`, fontSize) + 5 : 0; // 5px gap
+                maxLeftW = Math.max(maxLeftW, nameW + commentW);
+
+                if (col.DATA_TYPE) {
+                    maxTypeW = Math.max(maxTypeW, calcWidth(col.DATA_TYPE, fontSize));
+                }
+            });
+
+            // 2. 计算容器总宽度
+            const padding = 15;
+            const gap = 20; // 左右列间距
+            const titleW = calcWidth(label, headerFontSize) + (tableComment ? calcWidth(`(${tableComment})`, 10) + 10 : 0) + 40; // 40 for icon/padding
+
+            let contentWidth = padding + maxLeftW + gap + maxTypeW + padding;
+
+            // 限制宽度范围
+            const minWidth = 240;
+            const maxWidth = 600;
+            let finalWidth = Math.max(contentWidth, titleW, minWidth);
+            if (finalWidth > maxWidth) finalWidth = maxWidth;
+
+            // 3. 计算坐标
+            // Type 列起始X坐标 (靠右对齐的左边界)
+            // 实际上想要 Type 列整齐，我们可以固定 Type 列的起始位置
+            // Type Start X = Padding + MaxLeftW + Gap
+            const typeStartX = padding + maxLeftW + gap;
+
+            // 4. 开始绘制
+            const headerHeight = 36;
+            const rowHeight = 24;
+            const contentHeight = columns.length * rowHeight;
+            let footerHeight = 0; if (isTruncated) footerHeight = 24; else if (totalColCount > 10) footerHeight = 24;
+            const height = headerHeight + contentHeight + footerHeight + 8;
+
+            // 背景
+            group.addShape('rect', { attrs: { x: 0, y: 0, width: finalWidth, height, fill: '#fff', stroke: isCenter ? '#409EFF' : '#DCDFE6', lineWidth: 1, radius: 4 }, name: 'container-shape' });
+            // 表头
+            group.addShape('rect', { attrs: { x: 0, y: 0, width: finalWidth, height: headerHeight, fill: isCenter ? '#409EFF' : '#F2F6FC', radius: [4, 4, 0, 0] }, name: 'header-shape' });
+
+            // 标题
+            const titleShape = group.addShape('text', { attrs: { x: 10, y: headerHeight / 2, text: label, fill: isCenter ? '#fff' : '#333', fontSize: headerFontSize, fontWeight: 'bold', textBaseline: 'middle' }, name: 'title-text' });
+
+            // 表注释 (紧贴标题)
+            if (tableComment) {
+                const titleBox = titleShape.getBBox();
+                let tCmt = tableComment;
+                if (tCmt.length > 20) tCmt = tCmt.substring(0, 18) + '...';
+                group.addShape('text', { attrs: { x: titleBox.maxX + 8, y: headerHeight / 2, text: `(${tCmt})`, fill: isCenter ? '#eee' : '#909399', fontSize: 10, textBaseline: 'middle' }, name: 'comment-text' });
+            }
+
+            // 绘制行
+            columns.forEach((col, i) => {
+                const y = headerHeight + (i * rowHeight) + (rowHeight / 2);
+
+                // PK
+                if (col.IS_PK) group.addShape('circle', { attrs: { x: 12, y: y, r: 2.5, fill: '#E6A23C' } });
+
+                // 列名
+                const nameShape = group.addShape('text', {
+                    attrs: {
+                        x: 24, // 24px padding-left
+                        y: y,
+                        text: col.COLUMN_NAME,
+                        fill: col.IS_PK ? '#E6A23C' : '#333',
+                        fontSize: fontSize,
+                        textBaseline: 'middle',
+                        fontWeight: col.IS_PK ? 'bold' : 'normal',
+                        textAlign: 'left'
+                    }
+                });
+
+                // 注释 (紧贴列名)
+                if (col.COMMENTS) {
+                    const bbox = nameShape.getBBox();
+                    let commentX = bbox.maxX + 4;
+                    // 防止注释挤出 Type 列的区域
+                    if (commentX > typeStartX - 5) commentX = typeStartX - 5;
+
+                    group.addShape('text', {
+                        attrs: {
+                            x: commentX,
+                            y: y,
+                            text: `(${col.COMMENTS})`,
+                            fill: '#909399',
+                            fontSize: fontSize,
+                            textBaseline: 'middle',
+                            textAlign: 'left'
+                        }
+                    });
+                }
+
+                // 数据类型 (对齐显示)
+                if (col.DATA_TYPE) {
+                    group.addShape('text', {
+                        attrs: {
+                            x: typeStartX,
+                            y: y,
+                            text: col.DATA_TYPE,
+                            fill: '#606266',
+                            fontSize: fontSize,
+                            textBaseline: 'middle',
+                            textAlign: 'left'
+                        }
+                    });
+                }
+            });
+
+            const y = headerHeight + contentHeight + 12;
+            if (isTruncated) group.addShape('text', { attrs: { x: finalWidth / 2, y: y, text: `... (共 ${totalColCount} 列，点击展开)`, fill: '#909399', fontSize: 10, textAlign: 'center', textBaseline: 'middle', cursor: 'pointer' }, name: 'expand-text' });
+            else if (totalColCount > 10) group.addShape('text', { attrs: { x: finalWidth / 2, y: y, text: '⬆ 点击折叠', fill: '#409EFF', fontSize: 10, textAlign: 'center', textBaseline: 'middle', cursor: 'pointer' }, name: 'collapse-text' });
+
+            return group.get('children')[0];
+        }
+    });
+    
 const DM_DATA_TYPES = [
     'CHAR', 'VARCHAR', 'VARCHAR2', 'TEXT', 'LONG', 'CLOB', 'BLOB', 'IMAGE',
     'NUMBER', 'NUMERIC', 'DECIMAL', 'INTEGER', 'INT', 'BIGINT', 'TINYINT', 'BYTE', 'SMALLINT',
@@ -934,6 +1026,62 @@ export default {
             } catch (e) { this.handleError(e, '获取DDL失败'); }
         },
 
+        // --- LOB Support Methods ---
+        isBinaryLob(type) { return type && BINARY_LOB_TYPES.includes(type.toUpperCase()); },
+        isTextLob(type) { return type && TEXT_LOB_TYPES.includes(type.toUpperCase()); },
+        isLob(type) { return this.isBinaryLob(type) || this.isTextLob(type); },
+        isLobPlaceholder(val) { return val === '[BLOB 数据]' || val === '[CLOB 数据]' || val === '[BINARY 数据]'; },
+
+        hasLobData(row, col) {
+            const val = row[col.COLUMN_NAME];
+            return val && this.isLobPlaceholder(val);
+        },
+
+        triggerFileSelect(rowIndex, colName) { const el = document.getElementById(`file-${rowIndex}-${colName}`); if (el) el.click(); },
+
+        handleInlineFileUpload(event, row, colName) {
+            const file = event.target.files[0]; if (!file) return;
+            if (file.size > 10 * 1024 * 1024) { this.$message.warning("文件过大，建议保存行数据后使用单独的上传功能"); return; }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                this.$set(row, colName, e.target.result);
+                if (row.DB_INTERNAL_ID) { this.modifiedRows.add(row.DB_INTERNAL_ID); this.modifiedRows = new Set(this.modifiedRows); }
+            };
+            reader.readAsDataURL(file);
+        },
+
+        clearInlineFile(row, colName) { this.$set(row, colName, null); const el = document.getElementById(`file-${row._tempId}-${colName}`); if (el) el.value = ''; },
+
+        handlePreviewLob(row, col) {
+            this.currentLobRow = row; this.currentLobCol = col; this.previewLoading = true; this.previewContent = ''; this.previewUrl = '';
+            const type = col.DATA_TYPE.toUpperCase();
+            if (type === 'IMAGE' || type === 'BLOB') { this.previewType = 'image'; this.previewUrl = this.getLobUrl(row, col, false); }
+            else { this.previewType = 'text'; this.fetchLobText(row, col); }
+            this.previewVisible = true; this.previewLoading = false;
+        },
+        getLobUrl(row, col, download) { const baseUrl = process.env.VUE_APP_BASE_API || '/api'; return `${baseUrl}/db/lob/preview?schema=${this.currentSchema}&tableName=${this.activeTable}&colName=${col.COLUMN_NAME}&rowId=${row.DB_INTERNAL_ID}&download=${download}`; },
+        async fetchLobText(row, col) {
+            this.previewLoading = true;
+            try {
+                const res = await this.request('get', '/lob/preview', { schema: this.currentSchema, tableName: this.activeTable, colName: col.COLUMN_NAME, rowId: row.DB_INTERNAL_ID, download: false });
+                if (typeof res.data === 'string') { this.previewContent = res.data; } else { this.previewContent = JSON.stringify(res.data, null, 2); }
+            } catch (e) { this.previewContent = "加载失败: " + e.message; } finally { this.previewLoading = false; }
+        },
+        handleDownloadLob(row, col) { const url = this.getLobUrl(row, col, true); window.open(url, '_blank'); },
+        handleUploadLob(row, col) { this.currentLobRow = row; this.currentLobCol = col; this.$refs.lobFileInput.value = null; this.$refs.lobFileInput.click(); },
+        async handleFileChange(e) {
+            const file = e.target.files[0]; if (!file) return;
+            const formData = new FormData();
+            formData.append('file', file); formData.append('schema', this.currentSchema); formData.append('tableName', this.activeTable); formData.append('colName', this.currentLobCol.COLUMN_NAME); formData.append('rowId', this.currentLobRow.DB_INTERNAL_ID);
+            const loadingInstance = this.$loading({ lock: true, text: '正在上传...', background: 'rgba(0, 0, 0, 0.7)' });
+            try {
+                const res = await this.request('post', '/lob/upload', formData);
+                loadingInstance.close();
+                if (res.data.code === 200) { this.$message.success('上传成功'); this.loadData(); } else { this.$message.error(res.data.msg); }
+            } catch (e) { loadingInstance.close(); this.handleError(e, '上传失败'); }
+        },
+        downloadCurrentLob() { if (this.currentLobRow && this.currentLobCol) { this.handleDownloadLob(this.currentLobRow, this.currentLobCol); } },
+
         // --- 设计器相关方法 ---
         async handleDesignTable() {
             try {
@@ -1137,147 +1285,34 @@ export default {
         handleGraphFit() { if (!this.graphInstance) return; this.graphInstance.fitView(); },
         initGraph(data) {
             const container = this.$refs.relationCanvas; if (!container) return; container.innerHTML = '';
+
+            // 1. 将连线 label 置空
+            if (data.edges) {
+                data.edges.forEach(edge => {
+                    edge.label = '';
+                });
+            }
+
             const nodeCount = data.nodes.length; const ranksep = nodeCount > 5 ? 150 : 100;
-            this.graphInstance = new G6.Graph({ container, width: container.offsetWidth, height: container.offsetHeight, fitView: true, fitViewPadding: 40, renderer: 'canvas', layout: { type: 'dagre', rankdir: 'LR', nodesep: 50, ranksep: ranksep }, defaultNode: { type: 'db-table', anchorPoints: [[0, 0.5], [1, 0.5]] }, defaultEdge: { type: 'cubic-horizontal', style: { stroke: '#A3B1BF', lineWidth: 2, endArrow: true }, labelCfg: { autoRotate: true, style: { fontSize: 10, fill: '#aaa' } } }, modes: { default: ['drag-canvas', 'zoom-canvas', 'drag-node'] } });
+            this.graphInstance = new G6.Graph({
+                container,
+                width: container.offsetWidth,
+                height: container.offsetHeight,
+                fitView: true,
+                fitViewPadding: 40,
+                renderer: 'canvas',
+                layout: { type: 'dagre', rankdir: 'LR', nodesep: 50, ranksep: ranksep },
+                defaultNode: { type: 'db-table', anchorPoints: [[0, 0.5], [1, 0.5]] },
+                // 2. 移除 labelCfg
+                defaultEdge: {
+                    type: 'cubic-horizontal',
+                    style: { stroke: '#A3B1BF', lineWidth: 2, endArrow: true }
+                },
+                modes: { default: ['drag-canvas', 'zoom-canvas', 'drag-node'] }
+            });
             this.graphInstance.data(JSON.parse(JSON.stringify(data))); this.graphInstance.render();
             this.graphInstance.on('node:click', (e) => { const shapeName = e.target.get('name'); const nodeId = e.item.getModel().id; if (shapeName === 'expand-text') { if (!this.expandedTableList.includes(nodeId)) { this.expandedTableList.push(nodeId); this.loadRelations(); } } else if (shapeName === 'collapse-text') { const index = this.expandedTableList.indexOf(nodeId); if (index > -1) { this.expandedTableList.splice(index, 1); this.showAllColumns = false; this.loadRelations(); } } });
             this.graphInstance.on('node:dblclick', (e) => { const t = e.item.getModel().label; if (t !== this.activeTable) this.$emit('open-table', { connId: this.connId, schema: this.currentSchema, tableName: t, initViewMode: 'data' }); });
-        },
-
-        // [辅助] 判断类型
-        isBinaryLob(type) {
-            return type && BINARY_LOB_TYPES.includes(type.toUpperCase());
-        },
-        isTextLob(type) {
-            return type && TEXT_LOB_TYPES.includes(type.toUpperCase());
-        },
-        isLob(type) {
-            return this.isBinaryLob(type) || this.isTextLob(type);
-        },
-
-        // [新增] 触发文件选择
-        triggerFileSelect(rowIndex, colName) {
-            const el = document.getElementById(`file-${rowIndex}-${colName}`);
-            if (el) el.click();
-        },
-
-        // [新增] 处理行内文件上传 (转Base64)
-        handleInlineFileUpload(event, row, colName) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            // 限制一下大小，比如 10MB，防止浏览器卡死
-            if (file.size > 10 * 1024 * 1024) {
-                this.$message.warning("文件过大，建议保存行数据后使用单独的上传功能");
-                return;
-            }
-
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                // 将 Base64 赋值给 row，后端会识别并处理
-                this.$set(row, colName, e.target.result);
-
-                // 标记该行已被修改 (如果是现有行)
-                if (row.DB_INTERNAL_ID) {
-                    this.modifiedRows.add(row.DB_INTERNAL_ID);
-                    this.modifiedRows = new Set(this.modifiedRows); // 触发响应式
-                }
-            };
-            reader.readAsDataURL(file);
-        },
-
-        // [新增] 清除行内文件
-        clearInlineFile(row, colName) {
-            this.$set(row, colName, null);
-            const el = document.getElementById(`file-${row._tempId}-${colName}`);
-            if (el) el.value = '';
-        },
-
-        handlePreviewLob(row, col) {
-            this.currentLobRow = row;
-            this.currentLobCol = col;
-            this.previewLoading = true;
-            this.previewContent = '';
-            this.previewUrl = '';
-
-            // 判断类型
-            const type = col.DATA_TYPE.toUpperCase();
-            if (type === 'IMAGE' || type === 'BLOB') {
-                this.previewType = 'image';
-                this.previewUrl = this.getLobUrl(row, col, false);
-            } else {
-                this.previewType = 'text';
-                this.fetchLobText(row, col);
-            }
-            this.previewVisible = true;
-            this.previewLoading = false;
-        },
-        getLobUrl(row, col, download) {
-            const baseUrl = process.env.VUE_APP_BASE_API || '/api';
-            return `${baseUrl}/db/lob/preview?schema=${this.currentSchema}&tableName=${this.activeTable}&colName=${col.COLUMN_NAME}&rowId=${row.DB_INTERNAL_ID}&download=${download}`;
-        },
-        async fetchLobText(row, col) {
-            this.previewLoading = true;
-            try {
-                const res = await this.request('get', '/lob/preview', {
-                    schema: this.currentSchema,
-                    tableName: this.activeTable,
-                    colName: col.COLUMN_NAME,
-                    rowId: row.DB_INTERNAL_ID,
-                    download: false
-                });
-                if (typeof res.data === 'string') {
-                    this.previewContent = res.data;
-                } else {
-                    this.previewContent = JSON.stringify(res.data, null, 2);
-                }
-            } catch (e) {
-                this.previewContent = "加载失败: " + e.message;
-            } finally {
-                this.previewLoading = false;
-            }
-        },
-        handleDownloadLob(row, col) {
-            const url = this.getLobUrl(row, col, true);
-            window.open(url, '_blank');
-        },
-        handleUploadLob(row, col) {
-            this.currentLobRow = row;
-            this.currentLobCol = col;
-            this.$refs.lobFileInput.value = null;
-            this.$refs.lobFileInput.click();
-        },
-        async handleFileChange(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            const formData = new FormData();
-            formData.append('file', file);
-            formData.append('schema', this.currentSchema);
-            formData.append('tableName', this.activeTable);
-            formData.append('colName', this.currentLobCol.COLUMN_NAME);
-            formData.append('rowId', this.currentLobRow.DB_INTERNAL_ID);
-
-            const loadingInstance = this.$loading({ lock: true, text: '正在上传...', background: 'rgba(0, 0, 0, 0.7)' });
-
-            try {
-                const res = await this.request('post', '/lob/upload', formData);
-                loadingInstance.close();
-                if (res.data.code === 200) {
-                    this.$message.success('上传成功');
-                    this.loadData();
-                } else {
-                    this.$message.error(res.data.msg);
-                }
-            } catch (e) {
-                loadingInstance.close();
-                this.handleError(e, '上传失败');
-            }
-        },
-        downloadCurrentLob() {
-            if (this.currentLobRow && this.currentLobCol) {
-                this.handleDownloadLob(this.currentLobRow, this.currentLobCol);
-            }
         }
     },
     beforeDestroy() { this.destroyGraph(); }
@@ -1648,18 +1683,15 @@ export default {
     overflow: hidden;
 }
 
-/* 增加样式 */
 .placeholder-text {
     color: #C0C4CC;
     font-style: italic;
     font-size: 12px;
 }
 
-/* 优化大文本输入体验 */
 .inline-input-box textarea {
     font-family: Consolas, monospace;
     line-height: 1.4;
     resize: none;
-    /* 禁用手动调整大小，使用 autosize */
 }
 </style>
