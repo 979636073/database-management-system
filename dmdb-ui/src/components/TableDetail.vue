@@ -472,145 +472,142 @@ import request from '@/utils/request';
 import G6 from '@antv/g6';
 import SqlEditor from './SqlEditor.vue';
 
- // [修改] G6 RegisterNode: 自动宽度适配
-    G6.registerNode('db-table', {
-        draw: (cfg, group) => {
-            const { label, tableComment, columns = [], isCenter, isTruncated, totalColCount } = cfg;
+// G6 RegisterNode: 自动宽度适配
+G6.registerNode('db-table', {
+    draw: (cfg, group) => {
+        const { label, tableComment, columns = [], isCenter, isTruncated, totalColCount } = cfg;
 
-            // 辅助方法：计算文字宽度
-            const calcWidth = (str, fontSize) => {
-                if (!str) return 0;
-                let w = 0;
-                for (let i = 0; i < str.length; i++) {
-                    w += (str.charCodeAt(i) > 255) ? fontSize : fontSize * 0.6;
-                }
-                return w;
-            };
+        // 辅助方法：计算文字宽度
+        const calcWidth = (str, fontSize) => {
+            if (!str) return 0;
+            let w = 0;
+            for (let i = 0; i < str.length; i++) {
+                w += (str.charCodeAt(i) > 255) ? fontSize : fontSize * 0.6;
+            }
+            return w;
+        };
 
-            const fontSize = 10;
-            const headerFontSize = 12;
+        const fontSize = 10;
+        const headerFontSize = 12;
 
-            // 1. 计算各列最大宽度
-            let maxLeftW = 0; // 列名 + 注释
-            let maxTypeW = 0; // 数据类型
+        // 1. 计算各列最大宽度
+        let maxLeftW = 0; // 列名 + 注释
+        let maxTypeW = 0; // 数据类型
 
-            columns.forEach(col => {
-                const nameW = calcWidth(col.COLUMN_NAME, fontSize);
-                const commentW = col.COMMENTS ? calcWidth(`(${col.COMMENTS})`, fontSize) + 5 : 0; // 5px gap
-                maxLeftW = Math.max(maxLeftW, nameW + commentW);
+        columns.forEach(col => {
+            const nameW = calcWidth(col.COLUMN_NAME, fontSize);
+            const commentW = col.COMMENTS ? calcWidth(`(${col.COMMENTS})`, fontSize) + 5 : 0; // 5px gap
+            maxLeftW = Math.max(maxLeftW, nameW + commentW);
 
-                if (col.DATA_TYPE) {
-                    maxTypeW = Math.max(maxTypeW, calcWidth(col.DATA_TYPE, fontSize));
+            if (col.DATA_TYPE) {
+                maxTypeW = Math.max(maxTypeW, calcWidth(col.DATA_TYPE, fontSize));
+            }
+        });
+
+        // 2. 计算容器总宽度
+        const padding = 15;
+        const gap = 20; // 左右列间距
+        const titleW = calcWidth(label, headerFontSize) + (tableComment ? calcWidth(`(${tableComment})`, 10) + 10 : 0) + 40; // 40 for icon/padding
+
+        let contentWidth = padding + maxLeftW + gap + maxTypeW + padding;
+
+        // 限制宽度范围
+        const minWidth = 240;
+        const maxWidth = 600;
+        let finalWidth = Math.max(contentWidth, titleW, minWidth);
+        if (finalWidth > maxWidth) finalWidth = maxWidth;
+
+        // 3. 计算坐标
+        // Type 列起始X坐标
+        const typeStartX = padding + maxLeftW + gap;
+
+        // 4. 开始绘制
+        const headerHeight = 36;
+        const rowHeight = 24;
+        const contentHeight = columns.length * rowHeight;
+        let footerHeight = 0; if (isTruncated) footerHeight = 24; else if (totalColCount > 10) footerHeight = 24;
+        const height = headerHeight + contentHeight + footerHeight + 8;
+
+        // 背景
+        group.addShape('rect', { attrs: { x: 0, y: 0, width: finalWidth, height, fill: '#fff', stroke: isCenter ? '#409EFF' : '#DCDFE6', lineWidth: 1, radius: 4 }, name: 'container-shape' });
+        // 表头
+        group.addShape('rect', { attrs: { x: 0, y: 0, width: finalWidth, height: headerHeight, fill: isCenter ? '#409EFF' : '#F2F6FC', radius: [4, 4, 0, 0] }, name: 'header-shape' });
+
+        // 标题
+        const titleShape = group.addShape('text', { attrs: { x: 10, y: headerHeight / 2, text: label, fill: isCenter ? '#fff' : '#333', fontSize: headerFontSize, fontWeight: 'bold', textBaseline: 'middle' }, name: 'title-text' });
+
+        // 表注释 (紧贴标题)
+        if (tableComment) {
+            const titleBox = titleShape.getBBox();
+            let tCmt = tableComment;
+            if (tCmt.length > 20) tCmt = tCmt.substring(0, 18) + '...';
+            group.addShape('text', { attrs: { x: titleBox.maxX + 8, y: headerHeight / 2, text: `(${tCmt})`, fill: isCenter ? '#eee' : '#909399', fontSize: 10, textBaseline: 'middle' }, name: 'comment-text' });
+        }
+
+        // 绘制行
+        columns.forEach((col, i) => {
+            const y = headerHeight + (i * rowHeight) + (rowHeight / 2);
+
+            // PK
+            if (col.IS_PK) group.addShape('circle', { attrs: { x: 12, y: y, r: 2.5, fill: '#E6A23C' } });
+
+            // 列名
+            const nameShape = group.addShape('text', {
+                attrs: {
+                    x: 24, // 24px padding-left
+                    y: y,
+                    text: col.COLUMN_NAME,
+                    fill: col.IS_PK ? '#E6A23C' : '#333',
+                    fontSize: fontSize,
+                    textBaseline: 'middle',
+                    fontWeight: col.IS_PK ? 'bold' : 'normal',
+                    textAlign: 'left'
                 }
             });
 
-            // 2. 计算容器总宽度
-            const padding = 15;
-            const gap = 20; // 左右列间距
-            const titleW = calcWidth(label, headerFontSize) + (tableComment ? calcWidth(`(${tableComment})`, 10) + 10 : 0) + 40; // 40 for icon/padding
+            // 注释 (紧贴列名)
+            if (col.COMMENTS) {
+                const bbox = nameShape.getBBox();
+                let commentX = bbox.maxX + 4;
+                if (commentX > typeStartX - 5) commentX = typeStartX - 5;
 
-            let contentWidth = padding + maxLeftW + gap + maxTypeW + padding;
-
-            // 限制宽度范围
-            const minWidth = 240;
-            const maxWidth = 600;
-            let finalWidth = Math.max(contentWidth, titleW, minWidth);
-            if (finalWidth > maxWidth) finalWidth = maxWidth;
-
-            // 3. 计算坐标
-            // Type 列起始X坐标 (靠右对齐的左边界)
-            // 实际上想要 Type 列整齐，我们可以固定 Type 列的起始位置
-            // Type Start X = Padding + MaxLeftW + Gap
-            const typeStartX = padding + maxLeftW + gap;
-
-            // 4. 开始绘制
-            const headerHeight = 36;
-            const rowHeight = 24;
-            const contentHeight = columns.length * rowHeight;
-            let footerHeight = 0; if (isTruncated) footerHeight = 24; else if (totalColCount > 10) footerHeight = 24;
-            const height = headerHeight + contentHeight + footerHeight + 8;
-
-            // 背景
-            group.addShape('rect', { attrs: { x: 0, y: 0, width: finalWidth, height, fill: '#fff', stroke: isCenter ? '#409EFF' : '#DCDFE6', lineWidth: 1, radius: 4 }, name: 'container-shape' });
-            // 表头
-            group.addShape('rect', { attrs: { x: 0, y: 0, width: finalWidth, height: headerHeight, fill: isCenter ? '#409EFF' : '#F2F6FC', radius: [4, 4, 0, 0] }, name: 'header-shape' });
-
-            // 标题
-            const titleShape = group.addShape('text', { attrs: { x: 10, y: headerHeight / 2, text: label, fill: isCenter ? '#fff' : '#333', fontSize: headerFontSize, fontWeight: 'bold', textBaseline: 'middle' }, name: 'title-text' });
-
-            // 表注释 (紧贴标题)
-            if (tableComment) {
-                const titleBox = titleShape.getBBox();
-                let tCmt = tableComment;
-                if (tCmt.length > 20) tCmt = tCmt.substring(0, 18) + '...';
-                group.addShape('text', { attrs: { x: titleBox.maxX + 8, y: headerHeight / 2, text: `(${tCmt})`, fill: isCenter ? '#eee' : '#909399', fontSize: 10, textBaseline: 'middle' }, name: 'comment-text' });
-            }
-
-            // 绘制行
-            columns.forEach((col, i) => {
-                const y = headerHeight + (i * rowHeight) + (rowHeight / 2);
-
-                // PK
-                if (col.IS_PK) group.addShape('circle', { attrs: { x: 12, y: y, r: 2.5, fill: '#E6A23C' } });
-
-                // 列名
-                const nameShape = group.addShape('text', {
+                group.addShape('text', {
                     attrs: {
-                        x: 24, // 24px padding-left
+                        x: commentX,
                         y: y,
-                        text: col.COLUMN_NAME,
-                        fill: col.IS_PK ? '#E6A23C' : '#333',
+                        text: `(${col.COMMENTS})`,
+                        fill: '#909399',
                         fontSize: fontSize,
                         textBaseline: 'middle',
-                        fontWeight: col.IS_PK ? 'bold' : 'normal',
                         textAlign: 'left'
                     }
                 });
+            }
 
-                // 注释 (紧贴列名)
-                if (col.COMMENTS) {
-                    const bbox = nameShape.getBBox();
-                    let commentX = bbox.maxX + 4;
-                    // 防止注释挤出 Type 列的区域
-                    if (commentX > typeStartX - 5) commentX = typeStartX - 5;
+            // 数据类型 (对齐显示)
+            if (col.DATA_TYPE) {
+                group.addShape('text', {
+                    attrs: {
+                        x: typeStartX,
+                        y: y,
+                        text: col.DATA_TYPE,
+                        fill: '#606266',
+                        fontSize: fontSize,
+                        textBaseline: 'middle',
+                        textAlign: 'left'
+                    }
+                });
+            }
+        });
 
-                    group.addShape('text', {
-                        attrs: {
-                            x: commentX,
-                            y: y,
-                            text: `(${col.COMMENTS})`,
-                            fill: '#909399',
-                            fontSize: fontSize,
-                            textBaseline: 'middle',
-                            textAlign: 'left'
-                        }
-                    });
-                }
+        const y = headerHeight + contentHeight + 12;
+        if (isTruncated) group.addShape('text', { attrs: { x: finalWidth / 2, y: y, text: `... (共 ${totalColCount} 列，点击展开)`, fill: '#909399', fontSize: 10, textAlign: 'center', textBaseline: 'middle', cursor: 'pointer' }, name: 'expand-text' });
+        else if (totalColCount > 10) group.addShape('text', { attrs: { x: finalWidth / 2, y: y, text: '⬆ 点击折叠', fill: '#409EFF', fontSize: 10, textAlign: 'center', textBaseline: 'middle', cursor: 'pointer' }, name: 'collapse-text' });
 
-                // 数据类型 (对齐显示)
-                if (col.DATA_TYPE) {
-                    group.addShape('text', {
-                        attrs: {
-                            x: typeStartX,
-                            y: y,
-                            text: col.DATA_TYPE,
-                            fill: '#606266',
-                            fontSize: fontSize,
-                            textBaseline: 'middle',
-                            textAlign: 'left'
-                        }
-                    });
-                }
-            });
+        return group.get('children')[0];
+    }
+});
 
-            const y = headerHeight + contentHeight + 12;
-            if (isTruncated) group.addShape('text', { attrs: { x: finalWidth / 2, y: y, text: `... (共 ${totalColCount} 列，点击展开)`, fill: '#909399', fontSize: 10, textAlign: 'center', textBaseline: 'middle', cursor: 'pointer' }, name: 'expand-text' });
-            else if (totalColCount > 10) group.addShape('text', { attrs: { x: finalWidth / 2, y: y, text: '⬆ 点击折叠', fill: '#409EFF', fontSize: 10, textAlign: 'center', textBaseline: 'middle', cursor: 'pointer' }, name: 'collapse-text' });
-
-            return group.get('children')[0];
-        }
-    });
-    
 const DM_DATA_TYPES = [
     'CHAR', 'VARCHAR', 'VARCHAR2', 'TEXT', 'LONG', 'CLOB', 'BLOB', 'IMAGE',
     'NUMBER', 'NUMERIC', 'DECIMAL', 'INTEGER', 'INT', 'BIGINT', 'TINYINT', 'BYTE', 'SMALLINT',
@@ -623,7 +620,7 @@ const DM_DATA_TYPES = [
 
 const NO_LENGTH_TYPES = ['INT', 'INTEGER', 'BIGINT', 'TINYINT', 'SMALLINT', 'BYTE', 'DATE', 'TIME', 'TIMESTAMP', 'CLOB', 'BLOB', 'TEXT', 'LONG', 'BOOLEAN', 'IMAGE'];
 const SCALE_TYPES = ['NUMBER', 'DECIMAL', 'NUMERIC', 'FLOAT', 'DOUBLE', 'REAL'];
-const BINARY_LOB_TYPES = ['BLOB', 'IMAGE', 'BFILE', 'BINARY', 'VARBINARY', 'GEOMETRY'];
+const BINARY_LOB_TYPES = ['BLOB', 'IMAGE', 'BFILE', 'BINARY', 'VARBINARY', 'GEOMETRY', 'RAW', 'BYTE', 'LONGVARBINARY'];
 const TEXT_LOB_TYPES = ['CLOB', 'TEXT', 'LONG'];
 
 export default {
@@ -838,6 +835,24 @@ export default {
                     list = dataRes.data.data.list || []; total = dataRes.data.data.total || 0;
                     if (dataRes.data.data.isView) this.isSimpleView = dataRes.data.data.isSimpleView;
                 }
+
+                // 【修复】标准化数据键名 (处理后端返回 camelCase 但元数据是 UPPERCASE 的情况)
+                if (list && list.length > 0 && this.tableColumns.length > 0) {
+                    list.forEach(row => {
+                        this.tableColumns.forEach(col => {
+                            const colName = col.COLUMN_NAME;
+                            if (row[colName] === undefined) {
+                                // 尝试查找忽略大小写的匹配键
+                                const key = Object.keys(row).find(k => k.toUpperCase() === colName.toUpperCase());
+                                if (key) {
+                                    // 补全缺失的大写键名，确保 hasLobData 和 getCleanRowData 能正确工作
+                                    this.$set(row, colName, row[key]);
+                                }
+                            }
+                        });
+                    });
+                }
+
                 this.currentDataList = list; this.totalCount = total; this.originalDataMap = {};
                 list.forEach(row => { if (row.DB_INTERNAL_ID) this.originalDataMap[row.DB_INTERNAL_ID] = JSON.parse(JSON.stringify(row)); });
 
@@ -980,7 +995,7 @@ export default {
 
             this.$emit('open-table', {
                 connId: this.connId,
-                connName: this.connName, // [FIX] Issue 2: 传递 connection name
+                connName: this.connName,
                 schema: this.currentSchema,
                 tableName: row.TABLE_NAME,
                 initViewMode: 'data',
@@ -1033,7 +1048,11 @@ export default {
         isLobPlaceholder(val) { return val === '[BLOB 数据]' || val === '[CLOB 数据]' || val === '[BINARY 数据]'; },
 
         hasLobData(row, col) {
-            const val = row[col.COLUMN_NAME];
+            let val = row[col.COLUMN_NAME];
+            if (val === undefined && row) {
+                const key = Object.keys(row).find(k => k.toUpperCase() === (col.COLUMN_NAME || '').toUpperCase());
+                if (key) val = row[key];
+            }
             return val && this.isLobPlaceholder(val);
         },
 
@@ -1059,16 +1078,34 @@ export default {
             else { this.previewType = 'text'; this.fetchLobText(row, col); }
             this.previewVisible = true; this.previewLoading = false;
         },
-        getLobUrl(row, col, download) { const baseUrl = process.env.VUE_APP_BASE_API || '/api'; return `${baseUrl}/db/lob/preview?schema=${this.currentSchema}&tableName=${this.activeTable}&colName=${col.COLUMN_NAME}&rowId=${row.DB_INTERNAL_ID}&download=${download}`; },
+
+        // 【修改】LOB URL 生成方法：增加时间戳 _t 防止浏览器缓存旧图片
+        getLobUrl(row, col, download) {
+            const baseUrl = process.env.VUE_APP_BASE_API || '/api';
+            const timestamp = new Date().getTime(); // 获取当前时间戳
+            // 拼接 &connId=... 和 &_t=...
+            return `${baseUrl}/db/lob/preview?schema=${this.currentSchema}&tableName=${this.activeTable}&colName=${col.COLUMN_NAME}&rowId=${row.DB_INTERNAL_ID}&download=${download}&connId=${this.connId}&_t=${timestamp}`;
+        },
+
+        // 【关键修复】显式传递 connId 参数
         async fetchLobText(row, col) {
             this.previewLoading = true;
             try {
-                const res = await this.request('get', '/lob/preview', { schema: this.currentSchema, tableName: this.activeTable, colName: col.COLUMN_NAME, rowId: row.DB_INTERNAL_ID, download: false });
+                const res = await this.request('get', '/lob/preview', {
+                    schema: this.currentSchema,
+                    tableName: this.activeTable,
+                    colName: col.COLUMN_NAME,
+                    rowId: row.DB_INTERNAL_ID,
+                    download: false,
+                    connId: this.connId
+                });
                 if (typeof res.data === 'string') { this.previewContent = res.data; } else { this.previewContent = JSON.stringify(res.data, null, 2); }
             } catch (e) { this.previewContent = "加载失败: " + e.message; } finally { this.previewLoading = false; }
         },
         handleDownloadLob(row, col) { const url = this.getLobUrl(row, col, true); window.open(url, '_blank'); },
         handleUploadLob(row, col) { this.currentLobRow = row; this.currentLobCol = col; this.$refs.lobFileInput.value = null; this.$refs.lobFileInput.click(); },
+
+        // 【关键修复】移除 /table 前缀
         async handleFileChange(e) {
             const file = e.target.files[0]; if (!file) return;
             const formData = new FormData();
@@ -1286,7 +1323,6 @@ export default {
         initGraph(data) {
             const container = this.$refs.relationCanvas; if (!container) return; container.innerHTML = '';
 
-            // 1. 将连线 label 置空
             if (data.edges) {
                 data.edges.forEach(edge => {
                     edge.label = '';
@@ -1303,7 +1339,6 @@ export default {
                 renderer: 'canvas',
                 layout: { type: 'dagre', rankdir: 'LR', nodesep: 50, ranksep: ranksep },
                 defaultNode: { type: 'db-table', anchorPoints: [[0, 0.5], [1, 0.5]] },
-                // 2. 移除 labelCfg
                 defaultEdge: {
                     type: 'cubic-horizontal',
                     style: { stroke: '#A3B1BF', lineWidth: 2, endArrow: true }
@@ -1320,7 +1355,6 @@ export default {
 </script>
 
 <style scoped>
-/* 样式保持不变 */
 .table-detail-wrapper {
     height: 100%;
     display: flex;

@@ -21,7 +21,7 @@ public class ConnectionManager extends AbstractRoutingDataSource {
     // 缓存 SQL 控制台的专用长连接
     private static final Map<String, Connection> consoleConnections = new ConcurrentHashMap<>();
 
-    // 【新增】缓存 SQL 控制台的事务状态 (true=有未提交事务, false=无)
+    // 缓存 SQL 控制台的事务状态 (true=有未提交事务, false=无)
     private static final Map<String, Boolean> consoleDirtyStatus = new ConcurrentHashMap<>();
 
     @Override
@@ -90,6 +90,8 @@ public class ConnectionManager extends AbstractRoutingDataSource {
      * 获取控制台专用长连接
      */
     public static Connection getConsoleConnection(String key) throws SQLException {
+        if (key == null) return null; // 【修复】防止 NPE
+
         Connection existingConn = consoleConnections.get(key);
         if (existingConn != null && !existingConn.isClosed()) {
             return existingConn;
@@ -99,7 +101,6 @@ public class ConnectionManager extends AbstractRoutingDataSource {
         if (dsObj instanceof DataSource) {
             Connection newConn = ((DataSource) dsObj).getConnection();
             consoleConnections.put(key, newConn);
-            // 【新增】初始化事务状态为 false (Clean)
             consoleDirtyStatus.put(key, false);
             return newConn;
         }
@@ -110,6 +111,8 @@ public class ConnectionManager extends AbstractRoutingDataSource {
      * 获取普通短连接
      */
     public static Connection getNewConnection(String key) throws SQLException {
+        if (key == null) return null; // 【修复】关键修改：防止 key 为 null 时 ConcurrentHashMap 报错
+
         Object dsObj = targetDataSources.get(key);
         if (dsObj instanceof DataSource) {
             return ((DataSource) dsObj).getConnection();
@@ -118,8 +121,8 @@ public class ConnectionManager extends AbstractRoutingDataSource {
     }
 
     public static void closeConsoleConnection(String key) {
+        if (key == null) return;
         Connection conn = consoleConnections.remove(key);
-        // 【新增】移除事务状态
         consoleDirtyStatus.remove(key);
 
         if (conn != null) {
@@ -131,17 +134,11 @@ public class ConnectionManager extends AbstractRoutingDataSource {
         }
     }
 
-    /**
-     * 【新增】设置事务状态
-     */
     public static void setDirty(String key, boolean dirty) {
-        consoleDirtyStatus.put(key, dirty);
+        if (key != null) consoleDirtyStatus.put(key, dirty);
     }
 
-    /**
-     * 【新增】检查是否有未提交事务
-     */
     public static boolean isDirty(String key) {
-        return consoleDirtyStatus.getOrDefault(key, false);
+        return key != null && consoleDirtyStatus.getOrDefault(key, false);
     }
 }

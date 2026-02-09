@@ -1,6 +1,7 @@
 package com.example.dmdb.controller;
 
 import com.example.dmdb.common.Result;
+import com.example.dmdb.config.DynamicContext;
 import com.example.dmdb.service.impl.TableDataServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -54,29 +55,35 @@ public class TableDataController {
     }
 
     /**
-     * 【新增】LOB字段预览/下载
+     * 【新增】LOB 预览/下载接口
+     * 注意：由于 img 标签和 window.open 无法携带 Header，必须允许通过 URL 参数传递 connId
      */
     @GetMapping("/lob/preview")
-    public void previewLob(
-            @RequestParam String schema,
-            @RequestParam String tableName,
-            @RequestParam String colName,
-            @RequestParam String rowId,
-            @RequestParam(defaultValue = "false") boolean download,
-            HttpServletResponse response) {
+    public void previewLob(@RequestParam String schema,
+                           @RequestParam String tableName,
+                           @RequestParam String colName,
+                           @RequestParam String rowId,
+                           @RequestParam(defaultValue = "false") boolean download,
+                           @RequestParam(required = false) String connId,
+                           HttpServletResponse response) {
+        // 如果 URL 中传递了 connId，手动设置到上下文中
+        if (connId != null && !connId.isEmpty()) {
+            DynamicContext.setKey(connId);
+        }
         tableDataService.previewLob(schema, tableName, colName, rowId, download, response);
     }
 
     /**
-     * 【新增】LOB字段上传更新
+     * 【新增】LOB 上传接口
      */
     @PostMapping("/lob/upload")
-    public Result<Object> uploadLob(
-            @RequestParam String schema,
-            @RequestParam String tableName,
-            @RequestParam String colName,
-            @RequestParam String rowId,
-            @RequestParam("file") MultipartFile file) {
+    public Result<Object> uploadLob(@RequestParam String schema,
+                                    @RequestParam String tableName,
+                                    @RequestParam String colName,
+                                    @RequestParam String rowId,
+                                    @RequestParam("file") MultipartFile file) {
         return tableDataService.uploadLob(schema, tableName, colName, rowId, file);
     }
+
+
 }

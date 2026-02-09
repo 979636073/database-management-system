@@ -9,6 +9,7 @@ import com.example.dmdb.service.base.AbstractDbService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.io.InputStream;
 import java.sql.*;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -98,8 +99,11 @@ public class SqlServiceImpl extends AbstractDbService {
                 // 查询语句 (SELECT)
                 rs = stmt.getResultSet();
                 List<Map<String, Object>> resultList = convertResultSetToList(rs);
-                // 查询通常不改变事务脏状态，但我们要返回数据
-                return Result.success(processResultList(resultList));
+
+                // 【关键修复】处理结果集中的特殊对象，防止 Jackson 序列化报错
+                processResultList(resultList);
+
+                return Result.success(resultList);
             } else {
                 // 非查询语句 (INSERT/UPDATE/DELETE/DDL)
                 int affectedRows = stmt.getUpdateCount();
@@ -283,9 +287,6 @@ public class SqlServiceImpl extends AbstractDbService {
     }
 
     /**
-     * 【新增】脚本执行 (多条 SQL)
-     */
-    /**
      * 【核心修改】脚本执行 (多条 SQL)
      * 支持多条 SELECT 返回多个结果集，且单条报错不影响后续执行
      */
@@ -342,6 +343,9 @@ public class SqlServiceImpl extends AbstractDbService {
                         List<Map<String, Object>> dataList = convertResultSetToList(rs);
                         rs.close(); // 及时关闭 ResultSet
 
+                        // 【关键修正】这里也必须调用处理方法，否则执行脚本查询时依然会报错
+                        processResultList(dataList);
+
                         resultItem.put("type", "QUERY");
                         resultItem.put("data", dataList); // 保存数据供前端展示
                         resultItem.put("rows", dataList.size());
@@ -358,7 +362,6 @@ public class SqlServiceImpl extends AbstractDbService {
 
                 } catch (SQLException e) {
                     // === 情况C: 执行报错 ===
-                    // 【关键】捕获异常但不抛出，确保循环继续执行下一条
                     long duration = System.currentTimeMillis() - startTs;
                     resultItem.put("duration", duration);
                     resultItem.put("success", false);
@@ -392,6 +395,36 @@ public class SqlServiceImpl extends AbstractDbService {
                 }
             } catch (SQLException e) { e.printStackTrace(); }
         }
+    }
+
+    /**
+     * 【关键新增】处理结果集，将无法序列化的 Blob/Clob/Binary 对象转换为字符串占位符
+     * 解决 Jackson 序列化 dm.jdbc.driver.DmdbBlob 报错的问题
+     */
+    public List<Map<String, Object>> processResultList(List<Map<String, Object>> list) {
+        if (list == null || list.isEmpty()) return list;
+
+        for (Map<String, Object> row : list) {
+            for (Map.Entry<String, Object> entry : row.entrySet()) {
+                Object val = entry.getValue();
+                if (val == null) continue;
+
+                if (val instanceof Clob) {
+                    entry.setValue("[CLOB 数据]");
+                } else if (val instanceof Blob) {
+                    entry.setValue("[BLOB 数据]");
+                } else if (val instanceof byte[]) {
+                    entry.setValue("[BINARY 数据]");
+                } else if (val instanceof InputStream) {
+                    entry.setValue("[InputStream 数据]");
+                }
+                // 防止达梦驱动的其他内部对象导致序列化失败
+                else if (val.getClass().getName().startsWith("dm.jdbc")) {
+                    entry.setValue("[DM Object: " + val.getClass().getSimpleName() + "]");
+                }
+            }
+        }
+        return list;
     }
 
     // 提取原 executeSql 的核心逻辑为 executeSingle，方便维护
@@ -437,6 +470,7 @@ public class SqlServiceImpl extends AbstractDbService {
             if (hasResultSet) {
                 rs = stmt.getResultSet();
                 List<Map<String, Object>> resultList = convertResultSetToList(rs);
+                // 同样应用处理逻辑
                 return Result.success(processResultList(resultList));
             } else {
                 int affectedRows = stmt.getUpdateCount();
