@@ -567,6 +567,7 @@ export default {
       this.openTab(payload.connId, payload.connName, payload.schema, payload.tableName, payload.type, payload.filter, payload.initViewMode);
     },
 
+    // [核心修复] openTab 更新逻辑
     openTab(connId, connName, schema, tableName, tableType = 'table', filter = null, targetViewMode = null) {
       let tabKey = "";
       let title = "";
@@ -588,6 +589,11 @@ export default {
 
       if (existIndex > -1) {
         this.activeTab = tabKey;
+        // [修复] 如果标签页已存在，强制更新 filter，解决参数不生效问题
+        const tab = this.tabs[existIndex];
+        // 使用 $set 确保响应式更新
+        this.$set(tab, 'filter', filter);
+        if (targetViewMode) this.$set(tab, 'initViewMode', targetViewMode);
       } else {
         this.tabs.push({
           key: tabKey,

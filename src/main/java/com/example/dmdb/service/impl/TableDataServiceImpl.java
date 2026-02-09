@@ -472,7 +472,7 @@ public class TableDataServiceImpl extends AbstractDbService {
 
         String connId = DynamicContext.getKey();
         Connection conn = null;
-        PreparedStatement ps = null;
+        PreparedStatement ps = null;                                        
 
         try {
             conn = ConnectionManager.getNewConnection(connId);

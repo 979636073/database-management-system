@@ -121,7 +121,7 @@
                             <div class="data-stats">
                                 <span v-if="selectedRows.length > 0" style="color: #409EFF; margin-right: 15px;">已选 {{
                                     selectedRows.length
-                                }} 行</span>
+                                    }} 行</span>
                                 <span v-if="hasChanges" style="color: #E6A23C; margin-right: 10px;"><i
                                         class="el-icon-warning"></i>
                                     有未保存的更改</span>
@@ -280,7 +280,7 @@
                     style="max-width: 100%; max-height: 100%; box-shadow: 0 0 10px rgba(0,0,0,0.1);" />
                 <pre v-else-if="previewType === 'text'"
                     style="width:100%; white-space: pre-wrap; font-family: Consolas; background: #f5f7fa; padding: 10px;">{{
-            previewContent }}</pre>
+                        previewContent }}</pre>
                 <div v-else style="color: #999; text-align: center;">
                     <i class="el-icon-document" style="font-size: 48px;"></i>
                     <p>二进制文件，不支持直接预览，请下载。</p>
@@ -878,13 +878,22 @@ export default {
             this.$nextTick(() => { this.handleQuery(); });
         },
 
+        // 冲突处理
         resolveConflict(row) {
             this.conflictVisible = false;
             let filterValue = [];
             if (row.MY_VAL_LIST && row.MY_VAL_LIST.length > 0) filterValue = row.MY_VAL_LIST;
             else if (row.MY_VAL !== undefined && row.MY_VAL !== null) filterValue = [row.MY_VAL];
             else if (this.conflictPkValue) filterValue = [this.conflictPkValue];
-            this.$emit('open-table', { connId: this.connId, schema: this.currentSchema, tableName: row.TABLE_NAME, initViewMode: 'data', filter: { field: row.COLUMN_NAME, value: filterValue } });
+
+            this.$emit('open-table', {
+                connId: this.connId,
+                connName: this.connName, // [FIX] Issue 2: 传递 connection name
+                schema: this.currentSchema,
+                tableName: row.TABLE_NAME,
+                initViewMode: 'data',
+                filter: { field: row.COLUMN_NAME, value: filterValue }
+            });
         },
 
         handleSelectionChange(val) { this.selectedRows = val; },
