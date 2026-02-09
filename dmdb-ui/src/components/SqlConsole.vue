@@ -98,9 +98,8 @@
                             </div>
 
                             <div class="pagination-bar" v-if="isSelectQuery">
-                                <span style="margin-right: 10px; font-size: 12px; color: #909399;">
-                                    共 {{ totalRows }} 条 (服务端分页)
-                                </span>
+                                <span style="margin-right: 10px; font-size: 12px; color: #909399;">共 {{ totalRows }} 条
+                                    (服务端分页)</span>
                                 <el-pagination @size-change="handleSizeChange" @current-change="handleCurrentChange"
                                     :current-page="currentPage" :page-sizes="[50, 100, 500, 1000]" :page-size="pageSize"
                                     layout="sizes, prev, pager, next, jumper" :total="totalRows">
@@ -121,7 +120,6 @@
                             <el-tabs v-model="activeSubTab" type="card" class="sub-result-tabs">
                                 <el-tab-pane v-for="(res, idx) in queryResults" :key="idx"
                                     :label="`结果 ${res.index} (${res.rows}行)`" :name="String(idx)">
-
                                     <div style="height: 100%; display: flex; flex-direction: column;">
                                         <div class="table-body">
                                             <el-table :data="res.displayData || res.data.slice(0, res.pageSize)" border
@@ -168,13 +166,12 @@
                                             </span>
                                             <el-pagination @size-change="(val) => handleBatchSizeChange(val, res)"
                                                 @current-change="(val) => handleBatchCurrentChange(val, res)"
-                                                :current-page="res.currentPage" :page-sizes="[20, 50, 100, 500]"
+                                                :current-page="res.currentPage" :page-sizes="[20, 50, 100]"
                                                 :page-size="res.pageSize" layout="sizes, prev, pager, next, jumper"
                                                 :total="res.totalRows">
                                             </el-pagination>
                                         </div>
                                     </div>
-
                                 </el-tab-pane>
                             </el-tabs>
                         </div>
@@ -245,7 +242,7 @@ export default {
             previewTitle: '预览',
             currentUploadMeta: null,
 
-            // 单结果集分页状态
+            // 分页状态
             currentPage: 1,
             pageSize: 50,
             totalRows: 0,
@@ -270,7 +267,6 @@ export default {
         this.initConsole();
     },
     methods: {
-        // === 单结果集分页 ===
         handleSizeChange(val) {
             this.pageSize = val;
             this.currentPage = 1;
@@ -281,7 +277,7 @@ export default {
             if (this.isSelectQuery) this.doPagedQuery();
         },
 
-        // === 【新增】多结果集独立分页逻辑 ===
+        // 多结果集独立分页
         handleBatchSizeChange(val, res) {
             this.$set(res, 'pageSize', val);
             this.$set(res, 'currentPage', 1);
@@ -291,19 +287,17 @@ export default {
             this.$set(res, 'currentPage', val);
             this.doBatchPagedQuery(res);
         },
-        // 核心：处理批量结果的翻页
         async doBatchPagedQuery(res) {
-            // 如果数据已经在内存中（<= 5000条的范围内），直接切片
             const start = (res.currentPage - 1) * res.pageSize;
             const end = start + res.pageSize;
 
-            // 假设后端初始返回了5000条。如果请求的页在5000条内，直接使用内存数据
+            // 内存命中
             if (end <= res.data.length) {
                 this.$set(res, 'displayData', res.data.slice(start, end));
                 return;
             }
 
-            // 如果超出内存范围（需要服务端分页），则发起新请求
+            // 服务端分页加载
             const pagedSql = `SELECT * FROM (${res.sql}) LIMIT ${res.pageSize} OFFSET ${start}`;
             try {
                 const apiRes = await request.post('/db/execute', {
@@ -311,7 +305,6 @@ export default {
                 }, { headers: { 'Conn-Id': this.connId } });
 
                 if (apiRes.data.code === 200 && Array.isArray(apiRes.data.data)) {
-                    // 更新当前显示的切片数据
                     this.$set(res, 'displayData', apiRes.data.data);
                 }
             } catch (e) {
@@ -383,14 +376,17 @@ export default {
             } catch (e) { this.appendLog(`切换异常: ${e.message}`, 'error'); }
         },
 
-        // 【入口】用户点击执行按钮
+        // 【核心入口】用户点击执行按钮
         async handleExecuteClick() {
             const sqlText = this.$refs.sqlEditor.getSelectionOrAll();
             if (!sqlText || !sqlText.trim()) return this.$message.warning('请先输入SQL语句');
 
+            // 【关键修复】执行前必须重置错误信息，防止旧错误残留
+            this.errorMsg = '';
+
             const statements = sqlText.split(/;\s*(\n|$)/).map(s => s.trim()).filter(s => s.length > 0);
 
-            // 单条 SELECT 走专门的分页流程
+            // 如果是单条 SELECT，启动服务端分页流程
             if (statements.length === 1 && statements[0].toUpperCase().startsWith('SELECT')) {
                 let rawSql = statements[0];
                 if (rawSql.endsWith(';')) rawSql = rawSql.substring(0, rawSql.length - 1);
@@ -409,7 +405,6 @@ export default {
             }
         },
 
-        // 获取总数
         async fetchTotalCount(sql) {
             this.totalRows = 0;
             try {
@@ -429,7 +424,6 @@ export default {
             }
         },
 
-        // 内部统一执行逻辑
         async executeInternal(sql, resetState = true) {
             this.executing = true;
             if (resetState) {
@@ -443,14 +437,12 @@ export default {
                 const statements = sql.split(/;\s*(\n|$)/).map(s => s.trim()).filter(s => s.length > 0);
 
                 if (statements.length > 1) {
-                    // 脚本模式
                     const res = await request.post('/db/execute/script', {
                         sqls: statements, manualCommit: true
                     }, { headers: { 'Conn-Id': this.connId } });
 
                     this.processScriptResult(res, startTime);
                 } else {
-                    // 单条模式
                     const res = await request.post('/db/execute', {
                         sql: statements[0], manualCommit: true
                     }, { headers: { 'Conn-Id': this.connId } });
@@ -503,18 +495,15 @@ export default {
                         this.appendLog(msg, isError ? 'error' : 'success', item.index);
 
                         if (isQuery && item.success) {
-                            // 【核心】初始化多结果集的分页状态
                             const resObj = {
                                 ...item,
                                 currentPage: 1,
                                 pageSize: 50,
-                                totalRows: item.rows, // 初始值（例如5000）
-                                displayData: item.data.slice(0, 50), // 初始切片
+                                totalRows: item.rows,
+                                displayData: item.data.slice(0, 50),
                                 loadingCount: true
                             };
                             this.queryResults.push(resObj);
-
-                            // 【核心】异步加载真实总数
                             this.fetchTotalCountAsync(resObj);
                         }
                     });
@@ -530,7 +519,6 @@ export default {
             }
         },
 
-        // 【新增】异步获取脚本结果的总行数
         async fetchTotalCountAsync(resObj) {
             try {
                 const countSql = `SELECT COUNT(*) FROM (${resObj.sql})`;
