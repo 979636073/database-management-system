@@ -33,9 +33,9 @@
                             <el-descriptions-item label="用户名">{{ userInfo.USERNAME }}</el-descriptions-item>
                             <el-descriptions-item label="账户状态">{{ userInfo.ACCOUNT_STATUS }}</el-descriptions-item>
                             <el-descriptions-item label="默认表空间"><el-tag size="small">{{ userInfo.DEFAULT_TABLESPACE
-                            }}</el-tag></el-descriptions-item>
+                                    }}</el-tag></el-descriptions-item>
                             <el-descriptions-item label="概要文件">{{ userInfo.PROFILE || 'DEFAULT'
-                            }}</el-descriptions-item>
+                                }}</el-descriptions-item>
                         </el-descriptions>
                         <div style="margin-top: 30px;">
                             <h4 style="margin-bottom: 15px; color: #606266;">配额管理</h4>
@@ -152,7 +152,7 @@
                                         <span class="label">当前对象：</span>
                                         <el-tag type="success" effect="dark" size="small">{{ selectedSchema }}.{{
                                             currentTable
-                                        }}</el-tag>
+                                            }}</el-tag>
                                     </div>
                                     <el-button type="primary" icon="el-icon-check" size="small" :loading="savingObj"
                                         @click="saveObjPrivs">应用权限</el-button>
@@ -163,7 +163,7 @@
                                     <el-table-column prop="name" label="操作类型">
                                         <template slot-scope="scope">
                                             <el-tag size="medium" effect="light" class="priv-name-tag">{{ scope.row.name
-                                            }}</el-tag>
+                                                }}</el-tag>
                                         </template>
                                     </el-table-column>
 
@@ -245,8 +245,13 @@ const OBJ_PRIVS = ["SELECT", "INSERT", "UPDATE", "DELETE", "ALTER", "INDEX", "RE
 
 export default {
     name: 'UserDetail',
-    props: ['connId', 'username'],
+    props: ['connId', 'username', 'dbType'], // [新增] dbType
     data() {
+        // [修改] 根据数据库类型初始化权限列表
+        const privs = (this.dbType === 'ORACLE')
+            ? OBJ_PRIVS.filter(p => p !== 'SELECT FOR DUMP')
+            : OBJ_PRIVS;
+
         return {
             loading: false,
             activeTab: 'general',
@@ -261,7 +266,7 @@ export default {
             // 对象权限 (新)
             schemaList: [], selectedSchema: '', tableList: [], tableFilter: '', loadingTables: false,
             currentTable: '',
-            currentObjPerms: OBJ_PRIVS.map(p => ({ name: p, granted: false, admin: false })),
+            currentObjPerms: privs.map(p => ({ name: p, granted: false, admin: false })),
             existingObjPrivs: [], // 存储后端返回的所有对象权限
             objGrantAll: false, objAdminAll: false,
 
@@ -302,6 +307,13 @@ export default {
         filteredTables() {
             if (!this.tableFilter) return this.tableList;
             return this.tableList.filter(t => t.toLowerCase().includes(this.tableFilter.toLowerCase()));
+        },
+        // [新增] 动态计算可用权限列表
+        availableObjPrivs() {
+            if (this.dbType === 'ORACLE') {
+                return OBJ_PRIVS.filter(p => p !== 'SELECT FOR DUMP');
+            }
+            return OBJ_PRIVS;
         }
     },
     watch: {
@@ -399,7 +411,8 @@ export default {
 
         handleTableSelect(tableName) {
             this.currentTable = tableName;
-            this.currentObjPerms = OBJ_PRIVS.map(pName => {
+           // [修改] 使用 availableObjPrivs 代替 OBJ_PRIVS
+            this.currentObjPerms = this.availableObjPrivs.map(pName => {
                 const found = this.existingObjPrivs.find(p =>
                     this.getMapValue(p, 'OWNER') === this.selectedSchema &&
                     this.getMapValue(p, 'TABLE_NAME') === tableName &&

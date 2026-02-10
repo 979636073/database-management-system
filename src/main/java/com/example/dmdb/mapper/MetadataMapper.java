@@ -19,4 +19,6 @@ public interface MetadataMapper {
     List<Map<String, Object>> getTableComments(@Param("schema") String schema, @Param("tableList") List<String> tableList);
     List<Map<String, String>> getAllChildTables(@Param("schema") String schema, @Param("tableName") String tableName);
     String getPkColumn(@Param("schema") String schema, @Param("tableName") String tableName);
+    // 【新增】批量获取主键，配合优化 er-data
+    List<Map<String, Object>> getPkColumnsForTables(@Param("schema") String schema, @Param("tableList") List<String> tableList);
 }

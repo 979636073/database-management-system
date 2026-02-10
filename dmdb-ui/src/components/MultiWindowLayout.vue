@@ -105,10 +105,11 @@
             :initial-filter="item.filter" :init-view-mode="item.initViewMode" @view-mode-change="handleViewModeChange"
             @open-table="handleOpenTable" @table-comment-change="(val) => handleTableCommentChange(val, item)" />
 
-          <RoleDetail v-else-if="item.type === 'role'" :conn-id="item.connId" :role-name="item.roleName" />
-
           <UserDetail v-else-if="item.type === 'user'" :conn-id="item.connId" :username="item.username"
-            @user-deleted="handleUserDeleted" @user-status-changed="handleUserStatusChange" />
+            :db-type="item.dbType" @user-deleted="handleUserDeleted" @user-status-changed="handleUserStatusChange" />
+
+          <RoleDetail v-else-if="item.type === 'role'" :conn-id="item.connId" :role-name="item.roleName"
+            :db-type="item.dbType" />
 
           <ProcedureDetail v-else-if="item.type === 'PROCEDURE' || item.type === 'FUNCTION'" :conn-id="item.connId"
             :schema="item.schema" :name="item.tableName" :type="item.type" />
@@ -632,6 +633,10 @@ export default {
 
     // [核心修复] openTab 更新逻辑
     openTab(connId, connName, schema, tableName, tableType = 'table', filter = null, targetViewMode = null) {
+      // 1. 获取数据库类型
+      const connNode = this.treeData.find(n => n.id === connId);
+      const dbType = (connNode && connNode.config && connNode.config.dbType) ? connNode.config.dbType : 'DM';
+
       let tabKey = "";
       let title = "";
 
@@ -669,6 +674,7 @@ export default {
           type: tableType,
           roleName: tableType === 'role' ? tableName : null,
           username: tableType === 'user' ? tableName : null,
+          dbType: dbType, // 【新增】传入数据库类型
           filter: filter,
           initViewMode: finalViewMode,
         });
@@ -869,22 +875,50 @@ export default {
       return '长度';
     },
 
-    // 处理新建表时的类型变更，自动填充默认长度
+    // [修复] 处理新建表时的类型变更，统一管理默认值
     handleNewTableTypeChange(row) {
-      // 重置标度
-      row.scale = "";
+      const type = row.type ? row.type.toUpperCase() : '';
 
-      if (this.isLengthDisabled(row.type)) {
+      // 定义默认配置：{ len: 默认长度, scale: 默认标度 }
+      const DEFAULTS = {
+        // 字符型
+        'VARCHAR': { len: '50', scale: '' },
+        'VARCHAR2': { len: '50', scale: '' },
+        'NVARCHAR2': { len: '50', scale: '' },
+        'CHAR': { len: '10', scale: '' },
+        'NCHAR': { len: '10', scale: '' },
+
+        // 数值型 (核心修复：标度 scale 统一默认为 '0')
+        'NUMBER': { len: '10', scale: '0' },
+        'DECIMAL': { len: '10', scale: '0' },
+        'NUMERIC': { len: '10', scale: '0' },
+        'DOUBLE': { len: '10', scale: '0' },
+        'FLOAT': { len: '126', scale: '0' },
+        'REAL': { len: '63', scale: '0' },
+
+        // 二进制/位
+        'BIT': { len: '1', scale: '' },
+        'BINARY': { len: '50', scale: '' },
+        'VARBINARY': { len: '50', scale: '' },
+
+        // 时间型
+        'TIMESTAMP': { len: '6', scale: '' },
+        'TIME': { len: '6', scale: '' }
+      };
+
+      if (this.isLengthDisabled(type)) {
         row.length = "";
+        row.scale = "";
       } else {
-        const t = row.type.toUpperCase();
-        if (['VARCHAR', 'VARCHAR2', 'CHAR'].includes(t)) {
-          row.length = '50';
-        } else if (['DECIMAL', 'NUMERIC', 'NUMBER', 'FLOAT', 'DOUBLE', 'REAL'].includes(t)) {
-          row.length = '10';
-          row.scale = '2'; // 给默认标度
-        } else if (t === 'BIT') {
-          row.length = '1';
+        const config = DEFAULTS[type];
+        if (config) {
+          // 新建表时，直接应用默认配置
+          row.length = config.len;
+          row.scale = config.scale;
+        } else {
+          // 未配置的类型，清空默认值
+          row.length = "";
+          row.scale = "";
         }
       }
     }

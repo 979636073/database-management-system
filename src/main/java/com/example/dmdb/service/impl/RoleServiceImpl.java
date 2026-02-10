@@ -158,6 +158,10 @@ public class RoleServiceImpl extends AbstractDbService {
         // 1. 判断当前数据库类型
         boolean isOracle = "ORACLE".equalsIgnoreCase(DynamicContext.getCurrentDbType());
 
+        // 【新增】定义 Oracle 角色不支持的权限列表
+        // 原因: ORA-01931 cannot grant INDEX/REFERENCES to a role
+        Set<String> oracleRoleUnsupported = new HashSet<>(Arrays.asList("INDEX", "REFERENCES"));
+
         for (Map<String, Object> change : changes) {
             String priv = (String) change.get("priv");
             String action = (String) change.get("action");
@@ -165,10 +169,18 @@ public class RoleServiceImpl extends AbstractDbService {
 
             if (!priv.matches("^[A-Z_\\s]+$")) continue;
 
-            // 【核心修复 1】兼容性检查：如果当前是 Oracle 且权限是达梦特有的，则跳过
-            if (isOracle && DM_SPECIFIC_OBJ_PRIVS.contains(priv)) {
-                log.warn("检测到 Oracle 不支持的达梦特有权限 '{}'，已自动忽略该操作。", priv);
-                continue;
+            // 【核心修复 1】兼容性检查：如果当前是 Oracle
+            // 1. 过滤达梦特有权限 (SELECT FOR DUMP)
+            // 2. 过滤 Oracle 角色不支持的权限 (INDEX, REFERENCES)
+            if (isOracle) {
+                if (DM_SPECIFIC_OBJ_PRIVS.contains(priv)) {
+                    log.warn("Oracle 环境下自动忽略达梦特有权限: {}", priv);
+                    continue;
+                }
+                if (oracleRoleUnsupported.contains(priv)) {
+                    log.warn("Oracle 不支持将权限 [{}] 授予给角色，已自动忽略", priv);
+                    continue;
+                }
             }
 
             String qSchema = quote(schema);

@@ -7,6 +7,7 @@ import com.example.dmdb.service.base.AbstractDbService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.example.dmdb.config.DynamicContext;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -140,6 +141,9 @@ public class UserServiceImpl extends AbstractDbService {
 
         validateIdentifiers(username);
 
+        // 【新增】判断数据库类型
+        boolean isOracle = "ORACLE".equalsIgnoreCase(DynamicContext.getCurrentDbType());
+
         String sql = "";
         try {
             if ("SYS".equals(type)) {
@@ -150,11 +154,27 @@ public class UserServiceImpl extends AbstractDbService {
                 }
             }
             else if ("OBJ".equals(type)) {
-                // 对象权限: GRANT SELECT ON "SCHEMA"."TABLE" TO "USER" [WITH GRANT OPTION]
+                // 【修复 2】Oracle 兼容性过滤：忽略达梦特有权限
+                if (isOracle && ("SELECT FOR DUMP".equalsIgnoreCase(item) || "RESTORE".equalsIgnoreCase(item))) {
+                    log.warn("Oracle 环境下自动忽略达梦特有权限: {}", item);
+                    return Result.success("操作忽略(Oracle不支持此权限)");
+                }
+
                 String objectName = (String) params.get("objectName"); // 前端需传 "SCHEMA"."TABLE"
-                sql = String.format("%s %s ON %s %s \"%s\"", action, item, objectName, "GRANT".equals(action) ? "TO" : "FROM", username);
-                if ("GRANT".equals(action) && Boolean.TRUE.equals(adminOption)) {
-                    sql += " WITH GRANT OPTION";
+
+                if ("GRANT".equals(action)) {
+                    // 授权逻辑
+                    sql = String.format("GRANT %s ON %s TO \"%s\"", item, objectName, username);
+                    if (Boolean.TRUE.equals(adminOption)) {
+                        sql += " WITH GRANT OPTION";
+                    }
+                } else {
+                    // 【修复 1】回收逻辑：达梦需要 CASCADE，Oracle 不需要
+                    if (isOracle) {
+                        sql = String.format("REVOKE %s ON %s FROM \"%s\"", item, objectName, username);
+                    } else {
+                        sql = String.format("REVOKE %s ON %s FROM \"%s\" CASCADE", item, objectName, username);
+                    }
                 }
             }
             else if ("ROLE".equals(type)) {

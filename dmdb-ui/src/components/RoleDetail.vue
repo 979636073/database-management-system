@@ -77,7 +77,7 @@
                                 <el-table-column prop="name" label="权限名称">
                                     <template slot-scope="scope">
                                         <el-tag size="medium" effect="light" class="priv-name-tag">{{ scope.row.name
-                                        }}</el-tag>
+                                            }}</el-tag>
                                     </template>
                                 </el-table-column>
 
@@ -144,7 +144,7 @@
                                         <span class="label">当前对象：</span>
                                         <el-tag type="success" effect="dark" size="medium">{{ selectedSchema }} . {{
                                             currentTable
-                                        }}</el-tag>
+                                            }}</el-tag>
                                     </div>
                                     <el-button type="primary" icon="el-icon-check" size="small"
                                         @click="saveObjPrivs">应用权限</el-button>
@@ -215,8 +215,12 @@ const OBJ_PRIVS = ["SELECT", "INSERT", "UPDATE", "DELETE", "ALTER", "INDEX", "RE
 
 export default {
     name: 'RoleDetail',
-    props: ['connId', 'roleName'],
+    props: ['connId', 'roleName', 'dbType'],
     data() {
+        // [修改] 根据数据库类型初始化权限列表
+        const objPrivs = (this.dbType === 'ORACLE')
+            ? OBJ_PRIVS.filter(p => p !== 'SELECT FOR DUMP')
+            : OBJ_PRIVS;
         return {
             loading: false,
             activeTab: 'general',
@@ -242,6 +246,16 @@ export default {
         filteredExistingObjPrivs() {
             if (!this.selectedSchema) return [];
             return this.existingObjPrivs.filter(p => this.getMapValue(p, 'OWNER') === this.selectedSchema);
+        },
+        // [修改] 动态计算可用权限列表
+        availableObjPrivs() {
+            if (this.dbType === 'ORACLE') {
+                // Oracle 连接下：
+                // 1. 过滤达梦特有的 'SELECT FOR DUMP'
+                // 2. 过滤角色不支持的 'INDEX' 和 'REFERENCES' (ORA-01931)
+                return OBJ_PRIVS.filter(p => !['SELECT FOR DUMP', 'INDEX', 'REFERENCES'].includes(p));
+            }
+            return OBJ_PRIVS;
         }
     },
     mounted() { this.refreshData(); },
@@ -351,7 +365,8 @@ export default {
         },
         handleTableSelect(tableName) {
             this.currentTable = tableName;
-            this.currentObjPerms = OBJ_PRIVS.map(pName => {
+            // [修改] 使用 availableObjPrivs 代替 OBJ_PRIVS
+            this.currentObjPerms = this.availableObjPrivs.map(pName => {
                 const found = this.existingObjPrivs.find(p =>
                     this.getMapValue(p, 'OWNER') === this.selectedSchema &&
                     this.getMapValue(p, 'TABLE_NAME') === tableName &&

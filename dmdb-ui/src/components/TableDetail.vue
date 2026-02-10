@@ -121,7 +121,7 @@
                             <div class="data-stats">
                                 <span v-if="selectedRows.length > 0" style="color: #409EFF; margin-right: 15px;">已选 {{
                                     selectedRows.length
-                                }} 行</span>
+                                    }} 行</span>
                                 <span v-if="hasChanges" style="color: #E6A23C; margin-right: 10px;"><i
                                         class="el-icon-warning"></i>
                                     有未保存的更改</span>
@@ -280,7 +280,7 @@
                     style="max-width: 100%; max-height: 100%; box-shadow: 0 0 10px rgba(0,0,0,0.1);" />
                 <pre v-else-if="previewType === 'text'"
                     style="width:100%; white-space: pre-wrap; font-family: Consolas; background: #f5f7fa; padding: 10px;">{{
-            previewContent }}</pre>
+                        previewContent }}</pre>
                 <div v-else style="color: #999; text-align: center;">
                     <i class="el-icon-document" style="font-size: 48px;"></i>
                     <p>二进制文件，不支持直接预览，请下载。</p>
@@ -529,7 +529,8 @@ const DM_DATA_TYPES = [
     'BOOLEAN'
 ];
 
-const NO_LENGTH_TYPES = ['INT', 'INTEGER', 'BIGINT', 'TINYINT', 'SMALLINT', 'BYTE', 'DATE', 'TIME', 'TIMESTAMP', 'CLOB', 'BLOB', 'TEXT', 'LONG', 'BOOLEAN', 'IMAGE'];
+// 【修复】移除 TIME 和 TIMESTAMP，因为它们支持设置精度 (如 TIMESTAMP(6))
+const NO_LENGTH_TYPES = ['INT', 'INTEGER', 'BIGINT', 'TINYINT', 'SMALLINT', 'BYTE', 'DATE', 'CLOB', 'BLOB', 'TEXT', 'LONG', 'BOOLEAN', 'IMAGE'];
 const SCALE_TYPES = ['NUMBER', 'DECIMAL', 'NUMERIC', 'FLOAT', 'DOUBLE', 'REAL'];
 const BINARY_LOB_TYPES = ['BLOB', 'IMAGE', 'BFILE', 'BINARY', 'VARBINARY', 'GEOMETRY'];
 const TEXT_LOB_TYPES = ['CLOB', 'TEXT', 'LONG'];
@@ -1005,7 +1006,53 @@ export default {
         isScaleDisabled(type) { if (!type) return true; return !SCALE_TYPES.includes(type.toUpperCase()); },
 
         getLengthPlaceholder(type) { if (!type) return ''; const t = type.toUpperCase(); if (NO_LENGTH_TYPES.includes(t)) return '无'; return '长度'; },
-        handleTypeChange(row) { if (this.isLengthDisabled(row.DATA_TYPE)) { row.DATA_LENGTH = ''; } this.markModified(row); },
+        // 【修复】全能的类型切换处理
+        handleTypeChange(row) {
+            const type = row.DATA_TYPE ? row.DATA_TYPE.toUpperCase() : '';
+
+            // 定义常用类型的默认长度/精度
+            const DEFAULTS = {
+                'VARCHAR': '50', 'VARCHAR2': '50', 'NVARCHAR2': '50',
+                'CHAR': '10', 'NCHAR': '10',
+                'BIT': '1', 'BINARY': '50', 'VARBINARY': '50',
+                'NUMBER': '22', 'DECIMAL': '22', 'NUMERIC': '22', 'DOUBLE': '22',
+                'FLOAT': '126', 'REAL': '63',
+                'TIMESTAMP': '6', 'TIME': '6'
+            };
+
+            // 1. 检查类型是否支持长度
+            if (this.isLengthDisabled(type)) {
+                row.DATA_LENGTH = '';
+                row.DATA_SCALE = '';
+            } else {
+                const currentLen = row.DATA_LENGTH ? String(row.DATA_LENGTH) : '';
+                const newDefault = DEFAULTS[type];
+
+                // 【核心逻辑】智能填充
+                // 条件 A: 当前长度为空 (新列或从无长度类型切换而来)
+                // 条件 B: 当前长度等于其他类型的默认值 (例如 '50' 是 VARCHAR 的默认值，
+                //        如果切换到 NUMBER，我们应该把 '50' 重置为 '22'，而不是保留错误的 '50')
+                const knownDefaults = Object.values(DEFAULTS);
+
+                if (!currentLen || (newDefault && knownDefaults.includes(currentLen))) {
+                    if (newDefault) {
+                        row.DATA_LENGTH = newDefault;
+                    }
+                }
+
+                // 特殊处理：如果切回 NUMBER 且长度是默认 '22'，且原来可能有标度，这里重置标度为 0 比较安全
+                if (['NUMBER', 'DECIMAL'].includes(type) && row.DATA_LENGTH === '10' && !row.DATA_SCALE) {
+                    row.DATA_SCALE = '0';
+                }
+            }
+
+            // 2. 清理不支持标度的类型的标度值
+            if (this.isScaleDisabled(type)) {
+                row.DATA_SCALE = '';
+            }
+
+            this.markModified(row);
+        },
 
         markModified(row) {
             if (row._status === 'new') return;
