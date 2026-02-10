@@ -128,10 +128,22 @@
     </el-main>
 
     <el-dialog :title="dialogTitle" :visible.sync="dialogVisible" width="400px" :close-on-click-modal="false">
-      <el-form :model="connForm" label-width="80px" size="small">
+      <el-form :model="connForm" label-width="100px" size="small">
+        <el-form-item label="数据库类型">
+          <el-select v-model="connForm.dbType" placeholder="请选择" style="width: 100%">
+            <el-option label="达梦数据库 (DM)" value="DM"></el-option>
+            <el-option label="Oracle" value="ORACLE"></el-option>
+          </el-select>
+        </el-form-item>
+
         <el-form-item label="名称" required><el-input v-model="connForm.name"></el-input></el-form-item>
         <el-form-item label="主机" required><el-input v-model="connForm.host"></el-input></el-form-item>
         <el-form-item label="端口" required><el-input v-model="connForm.port"></el-input></el-form-item>
+
+        <el-form-item label="服务名/SID" v-if="connForm.dbType === 'ORACLE'">
+          <el-input v-model="connForm.serviceName" placeholder="例如: ORCL"></el-input>
+        </el-form-item>
+
         <el-form-item label="用户" required><el-input v-model="connForm.user"></el-input></el-form-item>
         <el-form-item label="密码"><el-input v-model="connForm.password" type="password"></el-input></el-form-item>
       </el-form>
@@ -352,7 +364,15 @@ export default {
       dialogTitle: "新建连接",
       connecting: false,
       testing: false,
-      connForm: { name: "本地达梦", host: "localhost", port: "5236", user: "SYSDBA", password: "" },
+      connForm: {
+        dbType: "DM", // 默认为达梦
+        name: "本地达梦",
+        host: "localhost",
+        port: "5236",
+        serviceName: "", // Oracle 专用
+        user: "SYSDBA",
+        password: ""
+      },
       submitting: false,
       currentNodeData: null,
       currentNodeRef: null,
@@ -384,6 +404,14 @@ export default {
     contextMenuVisible(visible) {
       if (visible) document.body.addEventListener('click', this.closeContextMenu);
       else document.body.removeEventListener('click', this.closeContextMenu);
+    },
+    // 监听数据库类型变化，自动切换默认端口
+    'connForm.dbType'(val) {
+      if (val === 'ORACLE') {
+        if (this.connForm.port === '5236') this.connForm.port = '1521';
+      } else {
+        if (this.connForm.port === '1521') this.connForm.port = '5236';
+      }
     }
   },
   created() {
@@ -510,8 +538,32 @@ export default {
       } else { resolve([]); }
     },
 
-    openAddDialog() { this.isEditMode = false; this.dialogTitle = "新建连接"; this.dialogVisible = true; },
-    openEditDialog(data) { this.isEditMode = true; this.currentEditNode = data; this.dialogTitle = "编辑连接"; this.connForm = JSON.parse(JSON.stringify(data.config || {})); if (!data.config) this.connForm.name = data.label; this.dialogVisible = true; },
+    openAddDialog() {
+      this.isEditMode = false;
+      this.dialogTitle = "新建连接";
+      // 重置为默认值
+      this.connForm = {
+        name: "本地达梦",
+        dbType: "DM",
+        host: "localhost",
+        port: "5236",
+        serviceName: "",
+        user: "SYSDBA",
+        password: ""
+      };
+      this.dialogVisible = true;
+    },
+    openEditDialog(data) {
+      this.isEditMode = true;
+      this.currentEditNode = data;
+      this.dialogTitle = "编辑连接";
+      // 兼容旧数据：如果没有dbType，默认添加DM
+      const defaults = { dbType: 'DM', serviceName: '' };
+      this.connForm = { ...defaults, ...JSON.parse(JSON.stringify(data.config || {})) };
+
+      if (!data.config) this.connForm.name = data.label;
+      this.dialogVisible = true;
+    },
     validateConnName(name) { if (!name || !name.trim()) return false; return !this.treeData.find(node => this.isEditMode && this.currentEditNode ? (node.label === name && node.id !== this.currentEditNode.id) : node.label === name); },
     async testConnection() {
       this.testing = true;
@@ -564,9 +616,21 @@ export default {
     },
 
     handleOpenTable(payload) {
-      this.openTab(payload.connId, payload.connName, payload.schema, payload.tableName, payload.type, payload.filter, payload.initViewMode);
+      // [修复] 尝试补全 connName
+      // 当从冲突界面跳转时，payload 可能不包含 connName，导致 Tab 标题显示 undefined
+      let connName = payload.connName;
+      if (!connName) {
+        // 在左侧树的根节点中查找对应的连接名称
+        const connNode = this.treeData.find(node => node.id === payload.connId);
+        if (connNode) {
+          connName = connNode.label;
+        }
+      }
+
+      this.openTab(payload.connId, connName, payload.schema, payload.tableName, payload.type, payload.filter, payload.initViewMode);
     },
 
+    // [核心修复] openTab 更新逻辑
     openTab(connId, connName, schema, tableName, tableType = 'table', filter = null, targetViewMode = null) {
       let tabKey = "";
       let title = "";
@@ -588,6 +652,11 @@ export default {
 
       if (existIndex > -1) {
         this.activeTab = tabKey;
+        // [修复] 如果标签页已存在，强制更新 filter，解决参数不生效问题
+        const tab = this.tabs[existIndex];
+        // 使用 $set 确保响应式更新
+        this.$set(tab, 'filter', filter);
+        if (targetViewMode) this.$set(tab, 'initViewMode', targetViewMode);
       } else {
         this.tabs.push({
           key: tabKey,

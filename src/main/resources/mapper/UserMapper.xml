@@ -57,7 +57,6 @@
         SELECT DISTINCT PRIVILEGE
         FROM DBA_SYS_PRIVS
         WHERE
-          -- 基础安全/审计过滤
           PRIVILEGE NOT LIKE 'AUDIT%'
           AND PRIVILEGE NOT LIKE 'MAC%'
           AND PRIVILEGE NOT LIKE 'LBAC%'
@@ -66,8 +65,6 @@
           AND PRIVILEGE NOT LIKE 'FLASHBACK%'
           AND PRIVILEGE NOT LIKE 'ADMINISTER%'
           AND PRIVILEGE NOT LIKE 'EXEMPT%'
-
-          -- 【新增】排除过于宽泛的 ANY 权限
           AND PRIVILEGE NOT LIKE 'ALTER ANY%'
           AND PRIVILEGE NOT LIKE 'CREATE ANY%'
           AND PRIVILEGE NOT LIKE 'DROP ANY%'
@@ -76,11 +73,8 @@
           AND PRIVILEGE NOT LIKE 'UPDATE ANY%'
           AND PRIVILEGE NOT LIKE 'DELETE ANY%'
           AND PRIVILEGE NOT LIKE 'EXECUTE ANY%'
-
-          -- 【新增】排除特定无关权限
           AND PRIVILEGE != 'LABEL DATABASE'
           AND PRIVILEGE != 'SPOOL'
-
         ORDER BY PRIVILEGE
     </select>
 

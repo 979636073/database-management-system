@@ -17,24 +17,41 @@ public class ConnectionController {
     @Autowired private ConnectionManager connectionManager;
 
     @PostMapping("/connect")
-    public Result<String> connect(@RequestBody Map<String, String> config) {
+    public Result<String> connect(@RequestBody Map<String, String> params) {
+        String host = params.get("host");
+        String port = params.get("port");
+        String user = params.get("user");
+        String password = params.get("password");
+
+        // 获取数据库类型，默认为 DM
+        String dbType = params.get("dbType");
+        if (dbType == null || dbType.trim().isEmpty()) {
+            dbType = "DM";
+        }
+
+        // 获取服务名 (Oracle专用)
+        String serviceName = params.get("serviceName");
+        if (serviceName == null) {
+            serviceName = "";
+        }
+
+        if (host == null || port == null || user == null || password == null) {
+            return Result.error("缺少必要连接参数");
+        }
+
+        // 【关键修改】优先使用前端传入的 id (用于页面刷新后的重连)
+        String connId = params.get("id");
+        if (connId == null || connId.trim().isEmpty()) {
+            // 如果前端没传，则生成新的 ID (用于新建连接)
+            connId = UUID.randomUUID().toString();
+        }
+
         try {
-            // 【修改】优先使用前端传来的 ID (用于刷新页面后重连)，如果没有则生成新 ID
-            String connId = config.get("id");
-            if (connId == null || connId.isEmpty()) {
-                connId = UUID.randomUUID().toString();
-            }
-
-            connectionManager.addDataSource(
-                    connId,
-                    config.get("host"),
-                    config.get("port"),
-                    config.get("user"),
-                    config.get("password")
-            );
-
+            // 调用 ConnectionManager 创建连接
+            connectionManager.addDataSource(connId, host, port, user, password, dbType, serviceName);
             return Result.success(connId);
         } catch (Exception e) {
+            e.printStackTrace();
             return Result.error("连接失败: " + e.getMessage());
         }
     }
@@ -62,10 +79,19 @@ public class ConnectionController {
 
     // 提取公共方法
     private void addDs(String id, Map<String, String> config) throws SQLException {
+        // 【新增】获取数据库类型，默认为 DM
+        String dbType = config.getOrDefault("dbType", "DM");
+        // 【新增】获取服务名 (Oracle需要)，默认为空
+        String serviceName = config.getOrDefault("serviceName", "");
+
         connectionManager.addDataSource(
-                id, config.get("host"), config.get("port"), config.get("user"), config.get("password")
+                id,
+                config.get("host"),
+                config.get("port"),
+                config.get("user"),
+                config.get("password"),
+                dbType,        // 传入 dbType
+                serviceName    // 传入 serviceName
         );
     }
-
-
 }

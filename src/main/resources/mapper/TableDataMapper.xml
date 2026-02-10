@@ -7,7 +7,7 @@
     </select>
 
     <select id="getDataPage" resultType="java.util.LinkedHashMap">
-        SELECT ROWIDTOCHAR(rowid) as DB_INTERNAL_ID, T.* FROM "${schema}"."${tableName}" T LIMIT #{limit} OFFSET #{offset}
+        SELECT ROWIDTOCHAR(rowid) as DB_INTERNAL_ID, T.* FROM "${schema}"."${tableName}" T
     </select>
 
     <select id="getDataByRowId" resultType="java.util.LinkedHashMap">
@@ -38,7 +38,6 @@
                 </if>
             </foreach>
         </where>
-        LIMIT #{limit} OFFSET #{offset}
     </select>
 
     <insert id="insertData">

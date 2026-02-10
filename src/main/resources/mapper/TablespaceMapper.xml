@@ -20,18 +20,35 @@
             ROUND(BYTES/1024/1024, 2) AS SIZE_MB,
             AUTOEXTENSIBLE,
             ROUND(MAXBYTES/1024/1024, 2) AS MAX_SIZE_MB,
-
-            -- [核心修正] 达梦 INCREMENT_BY 直接存储的是 MB 值，无需转换
             INCREMENT_BY AS NEXT_SIZE_MB,
-
             STATUS
         FROM DBA_DATA_FILES
         WHERE TABLESPACE_NAME = #{tablespaceName}
         ORDER BY FILE_ID
     </select>
 
+    <select id="listDatafiles_oracle" resultType="java.util.Map">
+        SELECT
+            d.FILE_ID,
+            d.FILE_NAME,
+            d.TABLESPACE_NAME,
+            ROUND(d.BYTES/1024/1024, 2) AS SIZE_MB,
+            d.AUTOEXTENSIBLE,
+            ROUND(d.MAXBYTES/1024/1024, 2) AS MAX_SIZE_MB,
+            ROUND(d.INCREMENT_BY * t.BLOCK_SIZE / 1024 / 1024, 2) AS NEXT_SIZE_MB,
+            d.STATUS
+        FROM DBA_DATA_FILES d
+        LEFT JOIN DBA_TABLESPACES t ON d.TABLESPACE_NAME = t.TABLESPACE_NAME
+        WHERE d.TABLESPACE_NAME = #{tablespaceName}
+        ORDER BY d.FILE_ID
+    </select>
+
     <select id="getPageSize" resultType="java.lang.Long">
         SELECT PAGE() FROM DUAL
+    </select>
+
+    <select id="getPageSize_oracle" resultType="java.lang.Long">
+        SELECT TO_NUMBER(VALUE) FROM V$PARAMETER WHERE NAME = 'db_block_size'
     </select>
 
 </mapper>

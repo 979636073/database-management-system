@@ -77,6 +77,9 @@ public class UserServiceImpl extends AbstractDbService {
             String sql = String.format("CREATE USER \"%s\" IDENTIFIED BY \"%s\"", username, password);
             if (tablespace != null && !tablespace.isEmpty()) {
                 sql += String.format(" DEFAULT TABLESPACE \"%s\"", tablespace);
+
+                // 【核心修复】必须追加这一句，否则新用户无法插入数据
+                sql += String.format(" QUOTA UNLIMITED ON \"%s\"", tablespace);
             }
             sqlMapper.executeSql(sql);
             return Result.success("用户创建成功");

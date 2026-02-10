@@ -1,39 +1,29 @@
 package com.example.dmdb.config;
 
-/**
- * 动态数据源上下文
- * 用于存放当前请求对应的连接ID (Conn-Id)
- */
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 public class DynamicContext {
-    // 使用 ThreadLocal 保证线程安全，存放当前线程的数据库连接ID
-    private static final ThreadLocal<String> CONTEXT = new ThreadLocal<>();
+    private static final ThreadLocal<String> contextHolder = new ThreadLocal<>();
+    // 必须是 ConcurrentHashMap 保证线程安全
+    private static final Map<String, String> DB_TYPE_MAP = new ConcurrentHashMap<>();
 
-    /**
-     * 设置当前线程的数据库连接ID
-     */
-    public static void setKey(String key) {
-        CONTEXT.set(key);
+    public static void setKey(String key) { contextHolder.set(key); }
+    public static String getKey() { return contextHolder.get(); }
+    public static void clear() { contextHolder.remove(); }
+
+    public static void setDbType(String key, String type) {
+        if (key != null && type != null) DB_TYPE_MAP.put(key, type);
     }
 
-    /**
-     * 获取当前线程的数据库连接ID
-     */
-    public static String getKey() {
-        return CONTEXT.get();
+    public static void removeDbType(String key) {
+        if (key != null) DB_TYPE_MAP.remove(key);
     }
 
-    /**
-     * 清除当前线程的数据库连接ID
-     */
-    public static void clear() {
-        CONTEXT.remove();
-    }
-
-    /**
-     * 【新增】获取当前连接ID (Alias for getKey)
-     * 供 SqlServiceImpl 调用，语义更清晰
-     */
-    public static String getConnId() {
-        return getKey();
+    public static String getCurrentDbType() {
+        String key = getKey();
+        // 增加空指针保护
+        if (key == null) return "DM";
+        return DB_TYPE_MAP.getOrDefault(key, "DM");
     }
 }
